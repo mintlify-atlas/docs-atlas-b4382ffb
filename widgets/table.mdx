@@ -1,0 +1,242 @@
+---
+title: "Table Widget: Multi-Column Data Grids in Ratatui"
+sidebarTitle: "Table"
+description: "Render scrollable, selectable tabular data in Ratatui with the Table widget — covering Rows, Cells, column Constraints, headers, footers, and TableState."
+---
+
+`Table` renders structured data as a grid of rows and columns. Like `List`, it implements
+`StatefulWidget` so selection and scroll state live in a `TableState` that persists across frames.
+The selected row, column, or individual cell can each carry their own highlight style, giving you
+fine-grained control over the visual feedback your application provides.
+
+## Core Building Blocks
+
+A `Table` is assembled from three types:
+
+- **`Cell`** — a single datum, styled independently. Accepts anything that converts to `Text`.
+- **`Row`** — an ordered collection of `Cell`s with an optional height and style.
+- **`Table`** — the widget that holds the rows, an optional header, an optional footer, and column
+  width constraints.
+
+## Creating a Table
+
+Pass an iterable of `Row`s and an iterable of column width `Constraint`s:
+
+```rust
+use ratatui::layout::Constraint;
+use ratatui::widgets::{Row, Table};
+
+let rows = [
+    Row::new(vec!["Alice", "Engineering", "8 years"]),
+    Row::new(vec!["Bob",   "Marketing",   "3 years"]),
+    Row::new(vec!["Carol", "Design",      "5 years"]),
+];
+
+let widths = [
+    Constraint::Length(10),
+    Constraint::Length(15),
+    Constraint::Length(10),
+];
+
+let table = Table::new(rows, widths);
+```
+
+<Warning>
+  Always call `.widths(…)` (or pass widths to `Table::new`). Without width constraints every
+  column renders with zero width and becomes invisible.
+</Warning>
+
+## Column Width Constraints
+
+Column widths use the same `Constraint` variants as layout:
+
+```rust
+use ratatui::layout::Constraint;
+
+let widths = [
+    Constraint::Length(12),      // Fixed 12 columns wide
+    Constraint::Percentage(40),  // 40 % of available space
+    Constraint::Min(8),          // At least 8 columns
+    Constraint::Fill(1),         // Fill remaining space equally
+];
+```
+
+## Styled Cells and Rows
+
+Individual cells can carry styles independent of their row:
+
+```rust
+use ratatui::style::{Style, Stylize};
+use ratatui::text::{Line, Span};
+use ratatui::widgets::{Cell, Row};
+
+let row = Row::new(vec![
+    Cell::from("Normal"),
+    Cell::from("Warning".yellow().bold()),
+    Cell::from(Line::from(vec![
+        Span::raw("Status: "),
+        Span::from("OK").green(),
+    ])),
+]);
+```
+
+Rows can be styled as a whole and given an explicit height for multi-line content:
+
+```rust
+use ratatui::style::Stylize;
+use ratatui::widgets::Row;
+
+let tall_row = Row::new(vec!["Line1\nLine2", "Data", "More"])
+    .height(2)
+    .style(Style::new().on_dark_gray());
+```
+
+## Header and Footer
+
+`Table::header` is a `Row` rendered above the data and always visible. `Table::footer` is always
+visible at the bottom:
+
+```rust
+use ratatui::style::{Style, Stylize};
+use ratatui::widgets::{Row, Table};
+
+let header = Row::new(vec!["Name", "Department", "Tenure"])
+    .style(Style::new().bold().underlined())
+    .bottom_margin(1);
+
+let footer = Row::new(vec!["Last updated: 2025-01-01"]);
+
+let table = Table::new(rows, widths)
+    .header(header)
+    .footer(footer);
+```
+
+## TableState
+
+`TableState` tracks the selected row index, the selected column index, and the scroll offset. Store
+it in your application struct:
+
+```rust
+use ratatui::widgets::TableState;
+
+struct App {
+    table_state: TableState,
+}
+
+impl App {
+    fn new() -> Self {
+        Self {
+            table_state: TableState::default().with_selected(Some(0)),
+        }
+    }
+
+    fn select_next_row(&mut self) {
+        self.table_state.select_next();
+    }
+
+    fn select_prev_row(&mut self) {
+        self.table_state.select_previous();
+    }
+
+    fn select_next_column(&mut self) {
+        self.table_state.select_next_column();
+    }
+}
+```
+
+## Highlight Styles
+
+Row, column, and cell selection each have independent styles, applied in that order (cell wins
+over column which wins over row):
+
+```rust
+use ratatui::style::{Style, Stylize};
+use ratatui::widgets::Table;
+
+let table = Table::new(rows, widths)
+    .row_highlight_style(Style::new().reversed())
+    .column_highlight_style(Style::new().red())
+    .cell_highlight_style(Style::new().blue().bold())
+    .highlight_symbol(">> ");
+```
+
+## Complete Stateful Example
+
+```rust
+use ratatui::Frame;
+use ratatui::layout::{Constraint, Rect};
+use ratatui::style::{Style, Stylize};
+use ratatui::widgets::{Block, Cell, Row, Table, TableState};
+
+struct App {
+    state: TableState,
+}
+
+impl App {
+    fn new() -> Self {
+        Self {
+            state: TableState::default().with_selected(Some(0)),
+        }
+    }
+
+    fn render(&mut self, frame: &mut Frame, area: Rect) {
+        let header = Row::new(vec!["Name", "Role", "Status"])
+            .style(Style::new().bold().underlined())
+            .bottom_margin(1);
+
+        let rows = vec![
+            Row::new(vec![
+                Cell::from("Alice"),
+                Cell::from("Engineer"),
+                Cell::from("Active".green()),
+            ]),
+            Row::new(vec![
+                Cell::from("Bob"),
+                Cell::from("Designer"),
+                Cell::from("Away".yellow()),
+            ]),
+            Row::new(vec![
+                Cell::from("Carol"),
+                Cell::from("Manager"),
+                Cell::from("Offline".red()),
+            ]),
+        ];
+
+        let widths = [
+            Constraint::Length(10),
+            Constraint::Length(12),
+            Constraint::Fill(1),
+        ];
+
+        let table = Table::new(rows, widths)
+            .header(header)
+            .block(Block::bordered().title(" Team "))
+            .row_highlight_style(Style::new().reversed())
+            .highlight_symbol("> ")
+            .column_spacing(1)
+            .scroll_padding(2);
+
+        frame.render_stateful_widget(table, area, &mut self.state);
+    }
+}
+```
+
+## Column Spacing
+
+`column_spacing` sets the number of blank columns between each data column (default `1`):
+
+```rust
+use ratatui::widgets::Table;
+
+let table = Table::new(rows, widths).column_spacing(2);
+```
+
+<Tip>
+  Use `TableState::with_selected_cell(Some((row, col)))` to pre-select both a row and a column
+  index at construction time. This is handy for restoring saved navigation state on app startup.
+</Tip>
+
+<Note>
+  Tables cannot be rendered in reverse order (bottom-to-top). If you need that, use `List` instead.
+  `List` also handles variable-height items more naturally when you do not need column structure.
+</Note>

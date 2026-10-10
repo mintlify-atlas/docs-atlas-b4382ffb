@@ -1,0 +1,343 @@
+---
+title: "Layout: Constraints, Flex Modes, and Splitting Space"
+sidebarTitle: "Layout"
+description: "How Ratatui's Layout engine works—Constraint variants, Flex modes, spacing, Rect, and the nested layout patterns used to build responsive TUI screens."
+---
+
+Ratatui's `Layout` struct divides a rectangular area into smaller `Rect` slices using a constraint-based solver. Layouts are directional—vertical splits produce rows, horizontal splits produce columns—and they compose naturally: the output of one `Layout::areas()` call can be fed directly into the next. This makes it possible to describe complex, responsive UIs entirely with declarative constraint lists.
+
+## A Practical Layout Example
+
+The code below produces a fullscreen UI with a one-line title bar, a main area split into two equal columns, and a one-line status bar:
+
+```rust
+use ratatui::Frame;
+use ratatui::layout::{Constraint, Layout};
+use ratatui::widgets::Block;
+
+fn draw(frame: &mut Frame) {
+    use Constraint::{Fill, Length, Min};
+
+    let vertical = Layout::vertical([Length(1), Min(0), Length(1)]);
+    let [title_area, main_area, status_area] = vertical.areas(frame.area());
+
+    let horizontal = Layout::horizontal([Fill(1); 2]);
+    let [left_area, right_area] = horizontal.areas(main_area);
+
+    frame.render_widget(Block::bordered().title("Title Bar"), title_area);
+    frame.render_widget(Block::bordered().title("Status Bar"), status_area);
+    frame.render_widget(Block::bordered().title("Left"), left_area);
+    frame.render_widget(Block::bordered().title("Right"), right_area);
+}
+```
+
+Running this produces:
+
+```text
+Title Bar───────────────────────────────────
+┌Left────────────────┐┌Right───────────────┐
+│                    ││                    │
+└────────────────────┘└────────────────────┘
+Status Bar──────────────────────────────────
+```
+
+## Creating a Layout
+
+```rust
+use ratatui::layout::{Constraint, Direction, Layout};
+
+// Vertical layout (rows) — most common shorthand
+let layout = Layout::vertical([Constraint::Length(3), Constraint::Fill(1)]);
+
+// Horizontal layout (columns)
+let layout = Layout::horizontal([Constraint::Length(20), Constraint::Min(0)]);
+
+// Explicit direction constructor
+let layout = Layout::new(
+    Direction::Vertical,
+    [Constraint::Percentage(30), Constraint::Percentage(70)],
+);
+```
+
+## Splitting an Area
+
+<CardGroup cols={2}>
+  <Card title="areas() — compile-time count" icon="brackets-curly">
+    Returns a fixed-size array. Use this when the number of constraints is known at compile time. Panics if the count doesn't match.
+
+    ```rust
+    let [top, bottom] = layout.areas(frame.area());
+    ```
+  </Card>
+  <Card title="split() — runtime count" icon="list">
+    Returns `Rc<[Rect]>`. Use this when the number of constraints is determined at runtime.
+
+    ```rust
+    let areas = layout.split(frame.area());
+    for (i, area) in areas.iter().enumerate() { /* ... */ }
+    ```
+  </Card>
+</CardGroup>
+
+## Constraint Variants
+
+`Constraint` defines how much space each section gets. Constraints are applied in priority order: `Min` and `Max` win over `Length`, which wins over `Percentage`, which wins over `Ratio`, which wins over `Fill`.
+
+### `Length(u16)` — exact size
+
+Sets the section to exactly the given number of rows or columns. This is the highest-priority fixed constraint.
+
+```rust
+Constraint::Length(3)  // exactly 3 rows (or columns)
+```
+
+```text
+┌──────────────────┐┌──────────────────┐
+│      20 px       ││      20 px       │
+└──────────────────┘└──────────────────┘
+[   Length(20)   ]  [   Length(20)   ]
+```
+
+**When to use:** fixed-size widgets like title bars, status bars, input boxes, or any widget that should not stretch.
+
+### `Min(u16)` — at least this size
+
+Guarantees the section is at least as large as the given value and, in non-`Legacy` flex modes, grows to fill excess space proportionally with other `Min` and `Fill` sections.
+
+```rust
+Constraint::Min(0)   // can be any size (including zero)
+Constraint::Min(20)  // at least 20 columns wide
+```
+
+**When to use:** main content areas that should take up remaining space while keeping at least a readable minimum size.
+
+### `Max(u16)` — at most this size
+
+Caps the section at the given size. The section may be smaller if the total available space is limited.
+
+```rust
+Constraint::Max(30)  // sidebar no wider than 30 columns
+```
+
+**When to use:** sidebars, panels, or any section that should not grow beyond a maximum width.
+
+### `Percentage(u16)` — fraction of total space
+
+Allocates a percentage of the **total** area (not the remaining space). Values are integers; use `Ratio` for fractional percentages like one-third.
+
+```rust
+Constraint::Percentage(25)   // 25% of the total area
+Constraint::Percentage(50)   // 50% of the total area
+```
+
+```text
+┌────────────────────────────────────┐┌──────────┐
+│              75%                   ││   25%    │
+└────────────────────────────────────┘└──────────┘
+```
+
+**When to use:** responsive splits where widget sizes should be proportional to the terminal size, but you can express them as whole-number percentages.
+
+### `Ratio(u32, u32)` — fractional proportion
+
+Like `Percentage`, but expressed as an exact fraction (`numerator / denominator`). Use this for splits that cannot be expressed as whole-number percentages (e.g. `Ratio(1, 3)` for exactly one-third).
+
+```rust
+Constraint::Ratio(1, 3)   // one-third of the total area
+Constraint::Ratio(2, 3)   // two-thirds of the total area
+```
+
+```text
+┌───────────┐┌──────────┐┌───────────┐┌──────────┐
+│   1/4     ││   1/4    ││   1/4     ││   1/4    │
+└───────────┘└──────────┘└───────────┘└──────────┘
+       [Ratio(1, 4); 4]
+```
+
+**When to use:** anywhere you need a fractional proportion that `Percentage` cannot express exactly.
+
+### `Fill(u16)` — proportional excess space
+
+`Fill` constraints absorb whatever space remains after all other constraints are satisfied. Multiple `Fill` sections divide the excess space proportionally by their scaling factor.
+
+```rust
+Constraint::Fill(1)   // equal share of excess space
+Constraint::Fill(2)   // twice as much space as Fill(1)
+```
+
+```text
+┌──────┐┌───────────────┐┌───────────────────────┐
+│  8px ││     17px      ││         25px          │
+└──────┘└───────────────┘└───────────────────────┘
+Fill(1)     Fill(2)              Fill(3)
+```
+
+**When to use:** `Fill` is the go-to for any section that should grow to fill remaining space—equivalent to CSS `flex-grow`. Use `Fill(1)` for equal sharing.
+
+### Constraint Priority Summary
+
+| Priority | Constraint | Effect |
+|----------|------------|--------|
+| 1 (highest) | `Min` | Minimum size hard floor |
+| 2 | `Max` | Maximum size hard cap |
+| 3 | `Length` | Exact target size |
+| 4 | `Percentage` | % of total area |
+| 5 | `Ratio` | Exact fraction of total area |
+| 6 (lowest) | `Fill` | Fills remaining space |
+
+## Flex Modes
+
+`Flex` controls how space is distributed when constraints are satisfied and excess remains. The default is `Flex::Start`.
+
+```rust
+use ratatui::layout::Flex;
+
+let layout = Layout::horizontal([
+    Constraint::Length(20),
+    Constraint::Length(20),
+])
+.flex(Flex::SpaceBetween);
+```
+
+| Mode | Behavior |
+|------|----------|
+| `Flex::Start` | Items packed at the start; excess at the end *(default)* |
+| `Flex::End` | Items packed at the end; excess at the start |
+| `Flex::Center` | Items centered; excess split equally before and after |
+| `Flex::SpaceBetween` | Excess distributed between items (none before first or after last) |
+| `Flex::SpaceAround` | Excess distributed around items (first/last get half) |
+| `Flex::SpaceEvenly` | Excess distributed equally between and around all items |
+| `Flex::Legacy` | Stretches the last item to fill excess space (tui-rs behavior) |
+
+<Tip>
+`Flex::SpaceBetween`, `Flex::SpaceAround`, and `Flex::SpaceEvenly` ignore any explicit `.spacing()` value because they manage gaps themselves.
+</Tip>
+
+## Spacing
+
+Use `.spacing()` to add a uniform gap (in cells) between every segment. Positive values add empty space; negative values create overlap:
+
+```rust
+// 1-cell gap between segments
+let layout = Layout::horizontal([
+    Constraint::Length(20),
+    Constraint::Length(20),
+])
+.spacing(1);
+
+// Overlapping borders — segments share a border cell
+let layout = Layout::horizontal([
+    Constraint::Length(20),
+    Constraint::Length(20),
+])
+.spacing(-1);
+```
+
+## Margins
+
+Add inset margins around the entire layout area before splitting:
+
+```rust
+let layout = Layout::vertical([Constraint::Fill(1)])
+    .margin(2);          // 2-cell margin on all sides
+
+let layout = Layout::horizontal([Constraint::Fill(1)])
+    .horizontal_margin(4)
+    .vertical_margin(1);
+```
+
+## The `Rect` Type
+
+Every layout operation produces and consumes `Rect` values. A `Rect` is a simple axis-aligned rectangle expressed in terminal cells:
+
+```rust
+pub struct Rect {
+    pub x: u16,
+    pub y: u16,
+    pub width: u16,
+    pub height: u16,
+}
+```
+
+`Rect` has helpers for common operations:
+
+```rust
+let area = frame.area();
+
+// Derived measurements
+let right = area.right();    // x + width
+let bottom = area.bottom();  // y + height
+
+// Shrink by a margin
+let inner = area.inner(Margin { horizontal: 2, vertical: 1 });
+
+// Check emptiness
+if area.is_empty() { return; }
+
+// Intersection (clamp to buffer bounds)
+let clipped = area.intersection(buf.area);
+```
+
+## Nested Layouts
+
+Layouts compose by feeding `areas()` results into new `Layout` calls:
+
+```rust
+use ratatui::Frame;
+use ratatui::layout::{Constraint, Layout};
+use ratatui::widgets::Block;
+
+fn draw(frame: &mut Frame) {
+    use Constraint::{Fill, Length, Min, Percentage};
+
+    // Outer vertical split: header / body / footer
+    let [header, body, footer] =
+        Layout::vertical([Length(1), Min(0), Length(1)]).areas(frame.area());
+
+    // Body horizontal split: sidebar / content
+    let [sidebar, content] =
+        Layout::horizontal([Length(20), Fill(1)]).areas(body);
+
+    // Content vertical split: toolbar / main / status
+    let [toolbar, main, _status] =
+        Layout::vertical([Length(2), Fill(1), Length(1)]).areas(content);
+
+    frame.render_widget(Block::bordered().title("Header"), header);
+    frame.render_widget(Block::bordered().title("Sidebar"), sidebar);
+    frame.render_widget(Block::bordered().title("Toolbar"), toolbar);
+    frame.render_widget(Block::bordered().title("Main"), main);
+    frame.render_widget(Block::bordered().title("Footer"), footer);
+}
+```
+
+## Helper Constructors
+
+`Constraint` provides convenience constructors for building constraint lists from iterators:
+
+```rust
+// From a list of fixed lengths
+let constraints = Constraint::from_lengths([10, 20, 10]);
+
+// Equal fractional splits
+let constraints = Constraint::from_ratios([(1, 4), (1, 2), (1, 4)]);
+
+// Percentage splits
+let constraints = Constraint::from_percentages([25, 50, 25]);
+
+// Proportional fills
+let constraints = Constraint::from_fills([1, 2, 1]);
+
+// Minimum-size constraints
+let constraints = Constraint::from_mins([0, 100, 0]);
+
+// Maximum-size constraints  
+let constraints = Constraint::from_maxes([30, u16::MAX]);
+```
+
+A bare `u16` also converts to `Constraint::Length` automatically:
+
+```rust
+// These two are equivalent:
+Layout::vertical([Constraint::Length(1), Constraint::Length(2), Constraint::Length(3)])
+Layout::vertical([1u16, 2, 3])
+```

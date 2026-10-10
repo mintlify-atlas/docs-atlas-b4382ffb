@@ -1,0 +1,506 @@
+---
+title: "Other Ratatui Widgets: Gauges, Charts, Canvas, and More"
+sidebarTitle: "Other Widgets"
+description: "Reference for Ratatui's remaining widgets: BarChart, Gauge, LineGauge, Sparkline, Tabs, Scrollbar, Canvas, Clear, Fill, Calendar, RatatuiLogo, and RatatuiMascot."
+---
+
+Ratatui's widget library extends well beyond the five major widgets covered in earlier pages.
+This page documents every other built-in widget with a code snippet for each, organized into
+expandable sections so you can jump directly to what you need.
+
+<Accordion title="BarChart — Categorical Bar Charts">
+
+`BarChart` renders vertical or horizontal bars from one or more groups of named data points. It
+supports per-bar and global styling, a configurable maximum value, gap widths, and group labels.
+
+**Key types:**
+- `Bar` — a single bar with a value, label, and optional display text
+- `BarGroup` — a labeled collection of `Bar`s
+- `BarChart` — the widget
+
+```rust
+use ratatui::style::{Style, Stylize};
+use ratatui::widgets::{Bar, BarChart, BarGroup, Block};
+
+// Simple vertical bar chart from a slice of (label, value) tuples
+let chart = BarChart::default()
+    .block(Block::bordered().title("Downloads"))
+    .bar_width(5)
+    .bar_gap(2)
+    .bar_style(Style::new().cyan())
+    .value_style(Style::new().bold().white())
+    .label_style(Style::new().dark_gray())
+    .data(&[("Mon", 42), ("Tue", 78), ("Wed", 55), ("Thu", 91), ("Fri", 63)]);
+```
+
+**Grouped bars** let you compare multiple series side by side:
+
+```rust
+use ratatui::widgets::{Bar, BarChart, BarGroup};
+
+let chart = BarChart::grouped(vec![
+    BarGroup::with_label(
+        "Q1",
+        vec![Bar::with_label("A", 30), Bar::with_label("B", 45)],
+    ),
+    BarGroup::with_label(
+        "Q2",
+        vec![Bar::with_label("A", 55), Bar::with_label("B", 20)],
+    ),
+])
+.bar_width(3)
+.group_gap(2);
+```
+
+**Horizontal bars** — swap the direction:
+
+```rust
+use ratatui::layout::Direction;
+use ratatui::widgets::{Bar, BarChart};
+
+let chart = BarChart::horizontal(vec![
+    Bar::with_label("Rust", 95),
+    Bar::with_label("Go",   78),
+    Bar::with_label("C++",  82),
+]);
+```
+
+<Tip>
+  Use `Bar::with_label("label", value).text_value("custom")` to display a different string
+  inside the bar than the raw integer (e.g. units, percentages, or formatted numbers).
+</Tip>
+
+</Accordion>
+
+<Accordion title="Gauge — Block-Fill Progress Bar">
+
+`Gauge` renders a rectangular progress bar filled with block characters. The fill level is set via
+a percentage (`0–100`) or a float ratio (`0.0–1.0`). An optional label is always centred inside
+the bar; when omitted the percentage is shown automatically.
+
+```rust
+use ratatui::style::{Style, Stylize};
+use ratatui::widgets::{Block, Gauge};
+
+// From a percentage (integer 0–100)
+let gauge = Gauge::default()
+    .block(Block::bordered().title("Upload"))
+    .gauge_style(Style::new().cyan().on_black())
+    .percent(67);
+
+// From a ratio (float 0.0–1.0)
+let gauge = Gauge::default()
+    .gauge_style(Style::new().green().on_dark_gray())
+    .ratio(0.42);
+
+// Custom label and unicode sub-cell precision
+let gauge = Gauge::default()
+    .gauge_style(Style::new().yellow())
+    .ratio(0.75)
+    .label("Downloading…")
+    .use_unicode(true);
+```
+
+<Note>
+  `use_unicode(true)` enables Unicode block elements (▏▎▍▌▋▊▉█) for sub-character precision,
+  giving a smoother-looking bar at the cost of requiring unicode font support.
+</Note>
+
+</Accordion>
+
+<Accordion title="LineGauge — Single-Line Progress Bar">
+
+`LineGauge` is a compact alternative to `Gauge` that renders exactly one terminal row. The filled
+and unfilled portions of the line use configurable symbols and styles, and the label is always
+left-aligned.
+
+```rust
+use ratatui::style::{Style, Stylize};
+use ratatui::symbols;
+use ratatui::widgets::{Block, LineGauge};
+
+let gauge = LineGauge::default()
+    .block(Block::bordered().title("Progress"))
+    .filled_style(Style::new().white().on_cyan().bold())
+    .filled_symbol(symbols::line::THICK_HORIZONTAL)
+    .unfilled_style(Style::new().dark_gray())
+    .ratio(0.4);
+```
+
+</Accordion>
+
+<Accordion title="Sparkline — Compact Trend Visualisation">
+
+`Sparkline` plots a sequence of `u64` values as a mini bar chart in a single row (or multiple
+rows). It is ideal for displaying rolling metrics such as CPU load, network throughput, or frame
+time in status bars.
+
+```rust
+use ratatui::style::{Color, Style, Stylize};
+use ratatui::symbols;
+use ratatui::widgets::{Block, RenderDirection, Sparkline};
+
+let data: Vec<u64> = vec![2, 5, 3, 8, 1, 6, 4, 9, 2, 7, 3, 5];
+
+let sparkline = Sparkline::default()
+    .block(Block::bordered().title("CPU %"))
+    .data(&data)
+    .max(100)                                    // cap the scale
+    .direction(RenderDirection::LeftToRight)
+    .style(Style::default().cyan().on_black());
+```
+
+**Absent values** — pass `Option<u64>` to mark gaps in the data:
+
+```rust
+use ratatui::style::Stylize;
+use ratatui::widgets::Sparkline;
+
+let data: Vec<Option<u64>> = vec![Some(3), None, Some(7), Some(2)];
+
+let sparkline = Sparkline::default()
+    .data(&data)
+    .absent_value_style(Style::new().dark_gray())
+    .absent_value_symbol("?");
+```
+
+</Accordion>
+
+<Accordion title="Tabs — Horizontal Tab Bar">
+
+`Tabs` displays a row of tab titles with one selected. It is purely presentational — your
+application is responsible for tracking the selected index and rendering the correct tab content
+below.
+
+```rust
+use ratatui::style::{Style, Stylize};
+use ratatui::symbols;
+use ratatui::widgets::{Block, Tabs};
+
+let tabs = Tabs::new(vec!["Overview", "Logs", "Config", "About"])
+    .block(Block::bordered().title("My App"))
+    .style(Style::default().white())
+    .highlight_style(Style::default().yellow().bold())
+    .select(1)                     // 0-indexed; "Logs" is selected
+    .divider(symbols::DOT)         // separator between tabs (default: │)
+    .padding("  ", "  ");          // space on each side of every tab title
+```
+
+Tabs can be individually styled by passing `Line` values instead of strings:
+
+```rust
+use ratatui::style::Stylize;
+use ratatui::widgets::Tabs;
+
+let tabs = Tabs::new(vec!["Tab 1".red(), "Tab 2".blue(), "Tab 3".green()])
+    .select(0);
+```
+
+Tabs can also be collected from an iterator:
+
+```rust
+use ratatui::widgets::Tabs;
+
+let tabs: Tabs = (0..5).map(|i| format!("Tab {i}")).collect();
+```
+
+</Accordion>
+
+<Accordion title="Scrollbar — Decorative Scrollbar Overlay">
+
+`Scrollbar` is a purely decorative overlay that shows scrolling position alongside another widget.
+It implements `StatefulWidget` via `ScrollbarState`, which records the total content length and the
+current position.
+
+```rust
+use ratatui::layout::Margin;
+use ratatui::style::Stylize;
+use ratatui::widgets::{
+    Block, Borders, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState,
+    StatefulWidget,
+};
+
+// In your App struct:
+struct App {
+    scroll: usize,
+    content_length: usize,
+}
+
+// In your render function:
+fn render(frame: &mut ratatui::Frame, app: &mut App) {
+    let area = frame.area();
+
+    // The paragraph carries the actual content
+    let paragraph = Paragraph::new("Line 1\nLine 2\nLine 3\n…")
+        .scroll((app.scroll as u16, 0))
+        .block(Block::new().borders(Borders::RIGHT));
+
+    frame.render_widget(paragraph, area);
+
+    // The scrollbar is rendered as a separate overlay
+    let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
+        .begin_symbol(Some("↑"))
+        .end_symbol(Some("↓"));
+
+    let mut scrollbar_state =
+        ScrollbarState::new(app.content_length).position(app.scroll);
+
+    frame.render_stateful_widget(
+        scrollbar,
+        area.inner(Margin { vertical: 1, horizontal: 0 }),
+        &mut scrollbar_state,
+    );
+}
+```
+
+**Orientations:**
+
+```rust
+use ratatui::widgets::ScrollbarOrientation;
+
+ScrollbarOrientation::VerticalRight    // default — right edge, scrolls vertically
+ScrollbarOrientation::VerticalLeft
+ScrollbarOrientation::HorizontalBottom
+ScrollbarOrientation::HorizontalTop
+```
+
+<Warning>
+  You must set `ScrollbarState::content_length` before rendering. A content length of `0` (the
+  default) renders a blank scrollbar.
+</Warning>
+
+</Accordion>
+
+<Accordion title="Canvas — Free-Form Shape Drawing">
+
+`Canvas` provides a blank drawing surface on which you paint arbitrary shapes using a closure. The
+surface uses a coordinate system defined by `x_bounds` and `y_bounds` — not terminal rows and
+columns. This makes it easy to plot geographic maps, waveforms, custom UI chrome, and more.
+
+```rust
+use ratatui::style::Color;
+use ratatui::widgets::Block;
+use ratatui::widgets::canvas::{Canvas, Circle, Line, Map, MapResolution, Points, Rectangle};
+
+let canvas = Canvas::default()
+    .block(Block::bordered().title("Canvas"))
+    .x_bounds([-180.0, 180.0])
+    .y_bounds([-90.0, 90.0])
+    .paint(|ctx| {
+        // Draw the world map
+        ctx.draw(&Map {
+            resolution: MapResolution::High,
+            color: Color::White,
+        });
+
+        // Draw a line
+        ctx.draw(&Line {
+            x1: -10.0, y1: 5.0,
+            x2:  10.0, y2: 5.0,
+            color: Color::Yellow,
+        });
+
+        // Draw a rectangle
+        ctx.draw(&Rectangle {
+            x: 20.0, y: 10.0,
+            width: 15.0, height: 8.0,
+            color: Color::Red,
+        });
+
+        // Draw a circle
+        ctx.draw(&Circle {
+            x: 0.0, y: 0.0,
+            radius: 20.0,
+            color: Color::Cyan,
+        });
+
+        // Scatter points
+        ctx.draw(&Points {
+            coords: &[(-50.0, -30.0), (40.0, 25.0), (10.0, -10.0)],
+            color: Color::Green,
+        });
+    });
+```
+
+**Available shapes:** `Circle`, `Line`, `FilledLine`, `Map`, `Points`, `Rectangle`
+
+**Marker options** (set with `Canvas::marker`):
+
+```rust
+use ratatui::symbols::Marker;
+
+Marker::Braille    // 2×4 dots per cell — highest resolution (default)
+Marker::Dot        // one • per cell
+Marker::Block      // one █ per cell
+Marker::Bar        // half-block ▄ per cell
+Marker::HalfBlock  // 1×2 half blocks
+Marker::Octant     // densely packed 2×4 pseudo-pixels
+```
+
+You can also print text directly on the canvas at any coordinate:
+
+```rust
+ctx.print(x, y, "Label".white());
+```
+
+</Accordion>
+
+<Accordion title="Clear — Erase an Area for Popups">
+
+`Clear` resets every cell in a given area back to the terminal's default — blank symbol, no
+colour, no modifier. Its primary use case is drawing pop-ups: clear the region first, then render
+the pop-up widget on top.
+
+```rust
+use ratatui::Frame;
+use ratatui::layout::Rect;
+use ratatui::widgets::{Block, Clear};
+
+fn draw_popup(frame: &mut Frame) {
+    let popup_area = Rect::new(10, 5, 40, 10);
+
+    // Clear any content that was rendered underneath
+    frame.render_widget(Clear, popup_area);
+
+    // Now draw the pop-up block on the freshly cleared area
+    frame.render_widget(Block::bordered().title("Popup"), popup_area);
+}
+```
+
+<Warning>
+  `Clear` cannot be used to clear the terminal on the very first render frame. Call
+  `Terminal::clear()` for that instead.
+</Warning>
+
+</Accordion>
+
+<Accordion title="Fill — Paint Every Cell with a Symbol">
+
+`Fill` paints every cell in its render area with a single repeated symbol and a single style. It
+is useful for drawing solid backgrounds, custom separators, and track regions behind scrollbars.
+
+```rust
+use ratatui::style::Stylize;
+use ratatui::widgets::Fill;
+
+// Fill with dots in blue
+let fill = Fill::new("·").blue().dim();
+
+// Fill with a solid block as a background colour
+let fill = Fill::new("█").dark_gray();
+
+// Erase an area with spaces (useful for custom clearing)
+let fill = Fill::new(" ");
+```
+
+`Fill` accepts any string (including multi-byte characters such as `"•"` or `"░"`) and panics on
+empty input. Cells that fall outside the buffer boundary are silently clipped.
+
+</Accordion>
+
+<Accordion title="Calendar — Monthly Calendar View (feature: widget-calendar)">
+
+`calendar::Monthly` renders a single calendar month. Days are styled with a default style or with
+styles provided by any type that implements `DateStyler`, which lets you highlight specific dates
+(e.g. events, deadlines, or today).
+
+<Info>
+  `Monthly` requires the **`widget-calendar`** feature flag and the `time` crate:
+
+  ```toml
+  [dependencies]
+  ratatui = { version = "*", features = ["widget-calendar"] }
+  time = "0.3"
+  ```
+</Info>
+
+```rust
+use ratatui::style::{Style, Stylize};
+use ratatui::widgets::calendar::Monthly;
+use time::Date;
+use time::Month;
+
+// Display January 2025
+let date = Date::from_calendar_date(2025, Month::January, 1).unwrap();
+
+let calendar = Monthly::new(date, /* events */ ())
+    .show_month_header(Style::new().bold())
+    .show_weekdays_header(Style::new().dark_gray())
+    .show_surrounding(Style::new().dim())
+    .default_style(Style::new().white());
+```
+
+The `events` parameter is any type that implements `DateStyler`. Ratatui provides a
+`CalendarEventStore` (a `HashMap<Date, Style>`) for convenience:
+
+```rust
+use ratatui::style::Stylize;
+use ratatui::widgets::calendar::{CalendarEventStore, Monthly};
+use time::{Date, Month};
+
+let today = Date::from_calendar_date(2025, Month::January, 15).unwrap();
+let mut events = CalendarEventStore::default();
+events.add(today, Style::new().red().bold());
+
+let calendar = Monthly::new(
+    Date::from_calendar_date(2025, Month::January, 1).unwrap(),
+    events,
+);
+```
+
+</Accordion>
+
+<Accordion title="RatatuiLogo — The Ratatui Logo Mark">
+
+`RatatuiLogo` renders the Ratatui project logo in two sizes. Use it on help screens or "about"
+dialogs to indicate your application is powered by Ratatui.
+
+```rust
+use ratatui::Frame;
+use ratatui::widgets::RatatuiLogo;
+
+fn render(frame: &mut Frame) {
+    // Tiny (default) — 2 rows × 15 columns
+    // ▛▚▗▀▖▜▘▞▚▝▛▐ ▌▌
+    // ▛▚▐▀▌▐ ▛▜ ▌▝▄▘▌
+    frame.render_widget(RatatuiLogo::tiny(), frame.area());
+
+    // Small — 2 rows × 27 columns
+    // █▀▀▄ ▄▀▀▄▝▜▛▘▄▀▀▄▝▜▛▘█  █ █
+    // █▀▀▄ █▀▀█ ▐▌ █▀▀█ ▐▌ ▀▄▄▀ █
+    frame.render_widget(RatatuiLogo::small(), frame.area());
+}
+```
+
+</Accordion>
+
+<Accordion title="RatatuiMascot — The Ratatui Mascot">
+
+`RatatuiMascot` renders the Ratatui mascot character using half-block Unicode art. The mascot
+occupies **32 columns × 16 rows** and renders in full colour.
+
+```rust
+use ratatui::Frame;
+use ratatui::widgets::RatatuiMascot;
+
+fn render(frame: &mut Frame) {
+    frame.render_widget(RatatuiMascot::default(), frame.area());
+}
+```
+
+You can give the mascot a custom eye color:
+
+```rust
+use ratatui::widgets::{MascotEyeColor, RatatuiMascot};
+
+let mascot = RatatuiMascot::default().eye_color(MascotEyeColor::Default);
+```
+
+<Tip>
+  To see the mascot in action, run the demo included in the repository:
+  ```shell
+  cargo run --example demo2
+  ```
+</Tip>
+
+</Accordion>

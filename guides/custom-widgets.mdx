@@ -1,0 +1,423 @@
+---
+title: "Building Custom Widgets in Ratatui"
+sidebarTitle: "Custom Widgets"
+description: "Implement the Widget and StatefulWidget traits, write to Buffer cells directly, compose existing widgets, and use the unstable WidgetRef trait."
+---
+
+Every piece of UI in Ratatui is a widget — a type that knows how to paint itself into a
+rectangular region of a `Buffer`. The `Widget` trait is the sole required building block: implement
+its one method and your type can be passed to `Frame::render_widget`. This guide walks through
+the trait, common implementation patterns, `StatefulWidget` for widgets that retain per-frame
+state, direct `Buffer` manipulation, and the unstable `WidgetRef` trait for storing heterogeneous
+widget collections.
+
+## The Widget trait
+
+```rust
+pub trait Widget {
+    fn render(self, area: Rect, buf: &mut Buffer)
+    where
+        Self: Sized;
+}
+```
+
+`area` is the `Rect` that the widget is allowed to paint; `buf` is the shared in-memory cell grid
+for the current frame. The widget writes into `buf` — it must not write outside `area`. Ratatui
+diffs `buf` against the previous frame and flushes only changed cells to the terminal.
+
+### Implementing on the type itself
+
+The simplest pattern: the widget is cheap to construct and does not need to outlive its render call.
+
+```rust
+use ratatui::buffer::Buffer;
+use ratatui::layout::Rect;
+use ratatui::text::Line;
+use ratatui::widgets::Widget;
+
+struct Greeting {
+    name: String,
+}
+
+impl Widget for Greeting {
+    fn render(self, area: Rect, buf: &mut Buffer) {
+        Line::from(format!("Hello, {}!", self.name)).render(area, buf);
+    }
+}
+```
+
+### Implementing on a reference (`impl Widget for &MyWidget`)
+
+Prefer this pattern when the widget stores data that should survive the render call. It avoids
+moving or cloning the widget on every frame and is the approach used by all built-in Ratatui
+widgets since version 0.26.
+
+```rust
+use ratatui::buffer::Buffer;
+use ratatui::layout::Rect;
+use ratatui::style::{Color, Style};
+use ratatui::text::Line;
+use ratatui::widgets::Widget;
+
+struct StatusBar {
+    message: String,
+    error: bool,
+}
+
+impl Widget for &StatusBar {
+    fn render(self, area: Rect, buf: &mut Buffer) {
+        let style = if self.error {
+            Style::new().fg(Color::Red)
+        } else {
+            Style::new().fg(Color::Green)
+        };
+        buf.set_style(area, style);
+        Line::from(self.message.as_str()).render(area, buf);
+    }
+}
+```
+
+Because `Widget for &StatusBar` is implemented, the same `StatusBar` instance can be rendered
+across multiple frames without being rebuilt:
+
+```rust
+// In your app's render method:
+let status = StatusBar { message: "All good".into(), error: false };
+terminal.draw(|frame| {
+    frame.render_widget(&status, frame.area());
+})?;
+```
+
+### Implementing on a mutable reference
+
+Use `impl Widget for &mut MyWidget` when the render pass itself needs to mutate the widget — for
+example, to record the last rendered position for hit-testing.
+
+```rust
+use ratatui::buffer::Buffer;
+use ratatui::layout::{Position, Rect};
+use ratatui::style::Color;
+use ratatui::widgets::Widget;
+
+#[derive(Default)]
+struct TrackedBox {
+    pub last_position: Position,
+}
+
+impl Widget for &mut TrackedBox {
+    fn render(self, area: Rect, buf: &mut Buffer) {
+        self.last_position = Position { x: area.x, y: area.y };
+        for y in area.top()..area.bottom() {
+            for x in area.left()..area.right() {
+                buf[(x, y)]
+                    .set_symbol("█")
+                    .set_fg(Color::Cyan);
+            }
+        }
+    }
+}
+```
+
+## StatefulWidget
+
+`StatefulWidget` adds an associated `State` type whose mutable reference is passed into the render
+call. Use this when the UI element needs persistent state between frames — for example, a scroll
+offset or selected index.
+
+```rust
+pub trait StatefulWidget {
+    type State: ?Sized;
+    fn render(self, area: Rect, buf: &mut Buffer, state: &mut Self::State);
+}
+```
+
+Render a stateful widget with `Frame::render_stateful_widget`:
+
+```rust
+frame.render_stateful_widget(my_widget, area, &mut my_state);
+```
+
+### Complete StatefulWidget example
+
+```rust
+use ratatui::buffer::Buffer;
+use ratatui::layout::Rect;
+use ratatui::style::{Color, Style, Stylize};
+use ratatui::text::Line;
+use ratatui::widgets::{StatefulWidget, Widget};
+
+/// A list of items that tracks a selected index.
+struct SelectableList<'a> {
+    items: &'a [&'a str],
+}
+
+#[derive(Default)]
+struct SelectableListState {
+    pub selected: Option<usize>,
+}
+
+impl StatefulWidget for SelectableList<'_> {
+    type State = SelectableListState;
+
+    fn render(self, area: Rect, buf: &mut Buffer, state: &mut Self::State) {
+        for (i, &item) in self.items.iter().enumerate() {
+            let y = area.y + i as u16;
+            if y >= area.bottom() {
+                break;
+            }
+            let is_selected = state.selected == Some(i);
+            let style = if is_selected {
+                Style::new().fg(Color::Black).bg(Color::White)
+            } else {
+                Style::default()
+            };
+            let prefix = if is_selected { "▶ " } else { "  " };
+            buf.set_string(area.x, y, format!("{prefix}{item}"), style);
+        }
+    }
+}
+```
+
+## Writing to the Buffer directly
+
+`Buffer` exposes several methods for painting content. All coordinates are absolute column/row
+positions within the terminal, not relative to the widget's `area`.
+
+<CardGroup cols={2}>
+  <Card title="set_string" icon="pen-line">
+    Write a string with a style. Clips to the end of the line.
+  </Card>
+  <Card title="set_style" icon="palette">
+    Apply a style to every cell in a rectangular area.
+  </Card>
+  <Card title="set_line" icon="align-left">
+    Write a styled `Line` (spans with individual styles) to a row.
+  </Card>
+  <Card title="cell / cell_mut" icon="square">
+    Get a reference to a single cell by `(x, y)` or `Position` for fine-grained mutation.
+  </Card>
+</CardGroup>
+
+```rust
+use ratatui::buffer::Buffer;
+use ratatui::layout::Rect;
+use ratatui::style::{Color, Style};
+use ratatui::text::{Line, Span};
+use ratatui::widgets::Widget;
+
+struct CustomWidget;
+
+impl Widget for CustomWidget {
+    fn render(self, area: Rect, buf: &mut Buffer) {
+        // Fill the entire area with a background colour.
+        buf.set_style(area, Style::new().bg(Color::DarkGray));
+
+        // Write a plain string at an absolute position.
+        buf.set_string(
+            area.x + 1,
+            area.y,
+            "┤ Custom Widget ├",
+            Style::new().fg(Color::White),
+        );
+
+        // Write a styled Line (multiple spans) on the second row.
+        let line = Line::from(vec![
+            Span::raw("Status: "),
+            Span::styled("OK", Style::new().fg(Color::Green)),
+        ]);
+        buf.set_line(area.x + 1, area.y + 1, &line, area.width - 2);
+
+        // Directly mutate a single cell.
+        if let Some(cell) = buf.cell_mut((area.x, area.y + 2)) {
+            cell.set_symbol("*").set_fg(Color::Yellow);
+        }
+    }
+}
+```
+
+<Tip>
+  Always intersect user-supplied coordinates with `area` before writing. Ratatui will panic
+  if you index outside the buffer's bounds. Use `area.intersection(buf.area)` or guard with
+  `if y < area.bottom()` checks.
+</Tip>
+
+## Composing existing widgets
+
+You can call other widgets' `render` methods inside your own. This is the standard way to build
+composite UIs.
+
+```rust
+use ratatui::buffer::Buffer;
+use ratatui::layout::{Constraint, Layout, Rect};
+use ratatui::style::Stylize;
+use ratatui::text::Line;
+use ratatui::widgets::{Block, Paragraph, Widget};
+
+struct Dashboard<'a> {
+    title: &'a str,
+    body: &'a str,
+}
+
+impl Widget for Dashboard<'_> {
+    fn render(self, area: Rect, buf: &mut Buffer) {
+        // Draw an outer block.
+        let block = Block::bordered().title(self.title);
+        let inner = block.inner(area);
+        block.render(area, buf);
+
+        // Split the inner area and render sub-widgets.
+        let [header_area, body_area] =
+            Layout::vertical([Constraint::Length(1), Constraint::Fill(1)]).areas(inner);
+
+        Line::from(self.title).bold().centered().render(header_area, buf);
+        Paragraph::new(self.body).render(body_area, buf);
+    }
+}
+```
+
+## A complete real-world custom widget
+
+The following is adapted from the `custom-widget` example in the Ratatui repository. It renders an
+interactive button with three visual states and a colour theme.
+
+```rust
+use ratatui::buffer::Buffer;
+use ratatui::layout::Rect;
+use ratatui::style::{Color, Style};
+use ratatui::text::Line;
+use ratatui::widgets::Widget;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum State { Normal, Selected, Active }
+
+#[derive(Debug, Clone, Copy)]
+struct Theme {
+    text:       Color,
+    background: Color,
+    highlight:  Color,
+    shadow:     Color,
+}
+
+const BLUE: Theme = Theme {
+    text:       Color::Rgb(16,  24,  48),
+    background: Color::Rgb(48,  72,  144),
+    highlight:  Color::Rgb(64,  96,  192),
+    shadow:     Color::Rgb(32,  48,  96),
+};
+
+#[derive(Debug, Clone)]
+struct Button<'a> {
+    label: Line<'a>,
+    theme: Theme,
+    state: State,
+}
+
+impl<'a> Button<'a> {
+    pub fn new<T: Into<Line<'a>>>(label: T) -> Self {
+        Self { label: label.into(), theme: BLUE, state: State::Normal }
+    }
+
+    pub const fn theme(mut self, theme: Theme) -> Self { self.theme = theme; self }
+    pub const fn state(mut self, state: State)  -> Self { self.state = state; self }
+
+    fn colors(&self) -> (Color, Color, Color, Color) {
+        match self.state {
+            State::Normal   => (self.theme.background, self.theme.text,
+                                self.theme.shadow,     self.theme.highlight),
+            State::Selected => (self.theme.highlight,  self.theme.text,
+                                self.theme.shadow,     self.theme.highlight),
+            State::Active   => (self.theme.background, self.theme.text,
+                                self.theme.highlight,  self.theme.shadow),
+        }
+    }
+}
+
+impl Widget for Button<'_> {
+    fn render(self, area: Rect, buf: &mut Buffer) {
+        let (background, text, shadow, highlight) = self.colors();
+        buf.set_style(area, Style::new().bg(background).fg(text));
+
+        // Top highlight bar.
+        if area.height > 2 {
+            buf.set_string(
+                area.x, area.y,
+                "▔".repeat(area.width as usize),
+                Style::new().fg(highlight).bg(background),
+            );
+        }
+        // Bottom shadow bar.
+        if area.height > 1 {
+            buf.set_string(
+                area.x, area.y + area.height - 1,
+                "▁".repeat(area.width as usize),
+                Style::new().fg(shadow).bg(background),
+            );
+        }
+        // Centred label.
+        let label_y = area.y + area.height / 2;
+        buf.set_line(area.x, label_y, &self.label.centered(), area.width);
+    }
+}
+```
+
+## The WidgetRef unstable trait
+
+`WidgetRef` allows widgets to be rendered by shared reference and stored as trait objects
+(`Box<dyn WidgetRef>`). It is gated behind the `unstable-widget-ref` feature flag because the API
+may change before stabilisation.
+
+```toml
+[dependencies]
+ratatui = { version = "0.30", features = ["unstable-widget-ref"] }
+```
+
+```rust
+pub trait WidgetRef {
+    fn render_ref(&self, area: Rect, buf: &mut Buffer);
+}
+
+pub trait StatefulWidgetRef {
+    type State;
+    fn render_ref(&self, area: Rect, buf: &mut Buffer, state: &mut Self::State);
+}
+```
+
+The primary use case is heterogeneous widget collections:
+
+```rust
+use ratatui::buffer::Buffer;
+use ratatui::layout::Rect;
+use ratatui::widgets::{Widget, WidgetRef};
+
+struct RedSquare;
+struct BlueSquare;
+
+impl WidgetRef for RedSquare {
+    fn render_ref(&self, area: Rect, buf: &mut Buffer) {
+        buf.set_style(area, ratatui::style::Style::new()
+            .bg(ratatui::style::Color::Red));
+    }
+}
+
+impl WidgetRef for BlueSquare {
+    fn render_ref(&self, area: Rect, buf: &mut Buffer) {
+        buf.set_style(area, ratatui::style::Style::new()
+            .bg(ratatui::style::Color::Blue));
+    }
+}
+
+// Store different widget types in a single Vec.
+let widgets: Vec<Box<dyn WidgetRef>> = vec![
+    Box::new(RedSquare),
+    Box::new(BlueSquare),
+];
+
+// Render each widget by calling render_ref.
+// frame.render_widget also accepts &dyn WidgetRef via a blanket impl.
+```
+
+<Note>
+  When you implement `Widget for &MyWidget`, you automatically get `WidgetRef` support through a
+  blanket implementation — you do **not** need to implement `WidgetRef` manually unless you
+  specifically need the trait-object (`dyn WidgetRef`) use case.
+</Note>

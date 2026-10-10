@@ -1,47 +1,203 @@
 ---
-title: "Quickstart"
-description: "Begin with a guide on the fastest path to a successful outcome"
+title: "Quickstart: Write Your First Ratatui Terminal UI App"
+sidebarTitle: "Quickstart"
+description: "Add ratatui and crossterm to a new Rust project and run a working Hello World terminal UI in four steps, with a full code walkthrough."
 ---
 
-Describe how someone begins using your product. What is the first thing they need to do? Are there any prerequisites?
-
-A quickstart should take someone from zero to using your product. They'll get a quick win and a sense of what they can accomplish.
-
-## Prerequisites
-
-Before you begin, you must have:
-
-- Requirement one (for example, Node.js 18+, a free account, an API key)
-- Requirement two (for example, a compatible device, a compatible browser, a compatible operating system)
-
-## Get started
+Ratatui applications are ordinary Rust binaries. You add two dependencies, write a `main` function, and you have a live terminal UI. This guide walks through that process step by step, explaining every line of the resulting program so you understand what is happening before moving on to more complex concepts.
 
 <Steps>
-  <Step title="Install">
-    Describe how to install your product or sign up.
 
-    ```bash
-    npm install your-package
+  <Step title="Create a new project and add dependencies">
+    Create a Rust binary crate and add `ratatui` plus `crossterm` as dependencies:
+
+    ```shell
+    cargo new hello-ratatui
+    cd hello-ratatui
+    cargo add ratatui crossterm
+    ```
+
+    `ratatui` is the TUI framework. `crossterm` is the default backend — it handles writing to the terminal and reading keyboard and mouse events on Linux, macOS, and Windows. The `ratatui` crate re-exports `crossterm` for you, but keeping it as an explicit dependency makes the version visible in your `Cargo.toml` and lets you use its event types without qualification.
+
+    Your `Cargo.toml` dependencies section will look like this:
+
+    ```toml
+    [dependencies]
+    crossterm = "0.29"
+    ratatui = "0.30"
     ```
   </Step>
-  <Step title="Configure">
-    Describe any setup or configuration needed before first use.
 
-    ```bash
-    your-cli init
-    ```
-  </Step>
-  <Step title="Run it">
-    Show the first thing a user does to see it working.
+  <Step title="Write the main function">
+    Replace the contents of `src/main.rs` with the minimal Hello World application:
 
-    ```bash
-    your-cli start
+    ```rust
+    use crossterm::event::{self, KeyCode};
+    use ratatui::widgets::Paragraph;
+    use ratatui::{DefaultTerminal, Frame};
+    use std::time::Duration;
+
+    fn main() -> Result<(), Box<dyn std::error::Error>> {
+        ratatui::run(run)
+    }
+
+    fn run(terminal: &mut DefaultTerminal) -> Result<(), Box<dyn std::error::Error>> {
+        loop {
+            terminal.draw(render)?;
+            if should_quit()? {
+                break;
+            }
+        }
+        Ok(())
+    }
+
+    fn render(frame: &mut Frame) {
+        let greeting = Paragraph::new("Hello World! (press 'q' to quit)");
+        frame.render_widget(greeting, frame.area());
+    }
+
+    fn should_quit() -> Result<bool, Box<dyn std::error::Error>> {
+        if event::poll(Duration::from_millis(250))? {
+            let key_press = event::read()?
+                .as_key_press_event()
+                .is_some_and(|key| key.code == KeyCode::Char('q'));
+            return Ok(key_press);
+        }
+        Ok(false)
+    }
     ```
+
+    Run the application with `cargo run`. You will see the text `Hello World! (press 'q' to quit)` fill the terminal. Press `q` to exit and the terminal will be cleanly restored.
+
+    <Tip>
+      If you want the absolute smallest possible program, the `minimal` example from the Ratatui repository fits in six lines:
+
+      ```rust
+      fn main() -> Result<(), Box<dyn std::error::Error>> {
+          ratatui::run(|terminal| {
+              loop {
+                  terminal.draw(|frame| frame.render_widget("Hello World!", frame.area()))?;
+                  if crossterm::event::read()?.is_key_press() {
+                      break Ok(());
+                  }
+              }
+          })
+      }
+      ```
+
+      The `hello-world` example above separates concerns into named functions, which scales better as the application grows.
+    </Tip>
   </Step>
+
+  <Step title="Understand how the UI is drawn">
+    The `terminal.draw(render)` call is the heart of every Ratatui application.
+
+    ```rust
+    fn render(frame: &mut Frame) {
+        let greeting = Paragraph::new("Hello World! (press 'q' to quit)");
+        frame.render_widget(greeting, frame.area());
+    }
+    ```
+
+    - `Frame` provides access to the terminal's current size via `frame.area()`, which returns a `Rect` describing the full drawable region.
+    - `frame.render_widget(widget, area)` writes the widget's content into an in-memory `Buffer` for the given `Rect`.
+    - After your closure returns, Ratatui **diffs** the new buffer against the previous frame's buffer and writes only the changed cells to the terminal. This keeps screen updates fast regardless of how large or complex the UI becomes.
+
+    `Paragraph` is one of many built-in widgets. Others include `Block`, `List`, `Table`, `Chart`, `Gauge`, `Sparkline`, and `Canvas`. Widgets can be nested and composed freely.
+  </Step>
+
+  <Step title="Understand terminal initialization and event handling">
+    **Initialization with `ratatui::run()`**
+
+    `ratatui::run()` wraps your application closure with automatic terminal setup and teardown:
+
+    1. Calls `ratatui::init()` internally, which:
+       - Enables **raw mode** so keystrokes are delivered immediately without waiting for Enter.
+       - Enters the **alternate screen buffer** so your UI does not overwrite the user's scrollback history.
+       - Installs a **panic hook** that restores the terminal before the process unwinds, keeping your shell clean even if your app crashes.
+    2. Passes a mutable `DefaultTerminal` (a `Terminal<CrosstermBackend<Stdout>>`) to your closure.
+    3. Calls `ratatui::restore()` after your closure returns, regardless of whether it succeeded or returned an error.
+
+    When you need explicit control over the terminal lifetime — for example when the setup and teardown must bracket code outside the application loop — use `init()` and `restore()` directly:
+
+    ```rust
+    fn main() -> std::io::Result<()> {
+        let mut terminal = ratatui::init();
+        let result = run_app(&mut terminal);
+        ratatui::restore();
+        result
+    }
+
+    fn run_app(terminal: &mut ratatui::DefaultTerminal) -> std::io::Result<()> {
+        loop {
+            terminal.draw(|frame| {
+                frame.render_widget("Hello World!", frame.area());
+            })?;
+            if crossterm::event::read()?.is_key_press() {
+                break Ok(());
+            }
+        }
+    }
+    ```
+
+    **Event handling**
+
+    Ratatui does not include an event system — input handling is done directly through the backend library. With the default `crossterm` backend, use `crossterm::event::read()` or `crossterm::event::poll()`:
+
+    ```rust
+    use crossterm::event::{self, Event, KeyCode, KeyEventKind};
+
+    fn handle_events() -> std::io::Result<bool> {
+        match event::read()? {
+            Event::Key(key) if key.kind == KeyEventKind::Press => match key.code {
+                KeyCode::Char('q') => return Ok(true),
+                // handle other keys here
+                _ => {}
+            },
+            Event::Resize(_, _) => {
+                // The next draw pass will re-render at the new size automatically.
+            }
+            _ => {}
+        }
+        Ok(false)
+    }
+    ```
+
+    <Note>
+      Ratatui does **not** automatically redraw when the terminal is resized. Continue your event loop and call `terminal.draw(...)` again — Ratatui queries the backend for the current size on each draw pass, so the layout always reflects the actual terminal dimensions at render time.
+    </Note>
+  </Step>
+
 </Steps>
 
-<Tip>
-  Give people a way to get help. This could be a link to a support page, a chat with a customer support agent, or a forum for your product.
+## Initialization Function Reference
 
-  Example: Need help? Reach out to us at [support@yourcompany.com](mailto:support@yourcompany.com).
-</Tip>
+The `ratatui::init` module exposes several initialization functions for different scenarios:
+
+| Function | Alternate Screen | Error handling | Best for |
+|---|---|---|---|
+| `ratatui::run(f)` | ✓ | Auto-cleanup | Most applications |
+| `ratatui::run_with_options(opts, f)` | ✗ | Auto-cleanup | Inline / fixed viewports |
+| `ratatui::init()` | ✓ | Panic | Standard fullscreen apps |
+| `ratatui::try_init()` | ✓ | `Result` | Apps that need custom error handling |
+| `ratatui::init_with_options(opts)` | ✗ | Panic | Custom viewport with manual teardown |
+| `ratatui::try_init_with_options(opts)` | ✗ | `Result` | Custom viewport with explicit errors |
+
+All initialization functions install a panic hook that restores the terminal before the hook fires. Call them **after** any other panic hooks you install so that restoration runs first.
+
+## What to Read Next
+
+<CardGroup cols={2}>
+  <Card title="Installation" icon="download" href="/installation">
+    Feature flags, backend selection, Cargo templates, and the minimum supported Rust version.
+  </Card>
+  <Card title="Widgets" icon="shapes" href="https://docs.rs/ratatui/latest/ratatui/widgets/index.html">
+    The full catalogue of built-in widgets with API documentation.
+  </Card>
+  <Card title="Layout" icon="table-columns" href="https://ratatui.rs/recipes/layout/">
+    Split the terminal into regions using constraints and flex modes.
+  </Card>
+  <Card title="Styling Text" icon="palette" href="https://ratatui.rs/recipes/render/style-text/">
+    Apply colours and text attributes with the `Stylize` shorthand trait.
+  </Card>
+</CardGroup>

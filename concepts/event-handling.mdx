@@ -1,0 +1,308 @@
+---
+title: "Event Handling: Input, Mouse, and Resize Events"
+sidebarTitle: "Events"
+description: "How Ratatui applications handle keyboard, mouse, resize, and focus events using crossterm—covering the Event enum, KeyEvent, and the event loop pattern."
+---
+
+Ratatui is a rendering library and deliberately ships without a built-in event system. Input handling is the responsibility of the backend crate. When using the default Crossterm backend, you handle events by calling `crossterm::event::read()` (or its non-blocking counterpart `crossterm::event::poll()`) directly in your application loop. This separation keeps Ratatui focused on rendering while giving you full control over how your application processes input.
+
+## The Event Loop Pattern
+
+Every Ratatui application follows the same fundamental loop: render the current state, then block waiting for the next event:
+
+```rust
+use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind};
+
+fn run(terminal: &mut ratatui::DefaultTerminal) -> std::io::Result<()> {
+    loop {
+        terminal.draw(|frame| render(frame))?;
+
+        match event::read()? {
+            Event::Key(key) if key.kind == KeyEventKind::Press => match key.code {
+                KeyCode::Char('q') => return Ok(()),
+                // handle other keys
+                _ => {}
+            },
+            // handle other event types
+            _ => {}
+        }
+    }
+}
+```
+
+`event::read()` blocks until an event is available. If you need non-blocking behavior (for example, to integrate a timer), use `event::poll()`:
+
+```rust
+use std::time::Duration;
+use crossterm::event;
+
+// Returns true if an event is ready within the timeout
+if event::poll(Duration::from_millis(16))? {
+    let ev = event::read()?;
+    // process ev
+}
+// Else: timeout expired, no event — redraw or update animations
+```
+
+## The `Event` Enum
+
+`crossterm::event::Event` is the top-level discriminant for everything the terminal can report:
+
+```rust
+pub enum Event {
+    FocusGained,
+    FocusLost,
+    Key(KeyEvent),
+    Mouse(MouseEvent),
+    Paste(String),
+    Resize(u16, u16),
+}
+```
+
+<CardGroup cols={2}>
+  <Card title="Key(KeyEvent)" icon="keyboard">
+    A keyboard event. Contains the key code, modifiers, and whether it is a press, repeat, or release.
+  </Card>
+  <Card title="Mouse(MouseEvent)" icon="computer-mouse">
+    A mouse event. Contains the column, row, kind (click, drag, scroll), and modifiers.
+  </Card>
+  <Card title="Resize(cols, rows)" icon="expand">
+    The terminal window was resized to the given dimensions. Call `draw()` again on the next iteration to re-render at the new size.
+  </Card>
+  <Card title="Paste(String)" icon="clipboard">
+    A bracketed-paste event. Requires enabling bracketed paste mode via Crossterm. Available when the terminal and feature flag support it.
+  </Card>
+</CardGroup>
+
+`FocusGained` and `FocusLost` fire when the terminal window gains or loses focus. Enable focus tracking with `crossterm::execute!(stdout(), crossterm::event::EnableFocusChange)`.
+
+## Keyboard Events
+
+`KeyEvent` carries three fields:
+
+```rust
+pub struct KeyEvent {
+    pub code: KeyCode,
+    pub modifiers: KeyModifiers,
+    pub kind: KeyEventKind,
+    pub state: KeyEventState, // rarely needed
+}
+```
+
+### `KeyCode` — which key
+
+The most commonly matched variants:
+
+```rust
+use crossterm::event::KeyCode;
+
+match key.code {
+    KeyCode::Char(c)   => { /* 'a'-'z', '0'-'9', symbols … */ }
+    KeyCode::Enter     => { /* Enter / Return */ }
+    KeyCode::Esc       => { /* Escape */ }
+    KeyCode::Backspace => { /* Backspace / Delete */ }
+    KeyCode::Delete    => { /* Forward Delete */ }
+    KeyCode::Tab       => { /* Tab */ }
+    KeyCode::BackTab   => { /* Shift+Tab */ }
+    KeyCode::Up        => { /* Arrow up */ }
+    KeyCode::Down      => { /* Arrow down */ }
+    KeyCode::Left      => { /* Arrow left */ }
+    KeyCode::Right     => { /* Arrow right */ }
+    KeyCode::Home      => { /* Home */ }
+    KeyCode::End       => { /* End */ }
+    KeyCode::PageUp    => { /* Page Up */ }
+    KeyCode::PageDown  => { /* Page Down */ }
+    KeyCode::F(n)      => { /* Function keys F1–F12 */ }
+    _ => {}
+}
+```
+
+### `KeyModifiers` — held modifier keys
+
+```rust
+use crossterm::event::KeyModifiers;
+
+if key.modifiers.contains(KeyModifiers::CONTROL) {
+    // Ctrl is held
+}
+if key.modifiers.contains(KeyModifiers::SHIFT) {
+    // Shift is held
+}
+if key.modifiers.contains(KeyModifiers::ALT) {
+    // Alt / Meta is held
+}
+```
+
+`KeyCode::Char('c')` with `KeyModifiers::CONTROL` is Ctrl-C, for example.
+
+### `KeyEventKind` — press, repeat, or release
+
+```rust
+use crossterm::event::KeyEventKind;
+
+match key.kind {
+    KeyEventKind::Press   => { /* initial key down — always handle this */ }
+    KeyEventKind::Repeat  => { /* key held, OS auto-repeat firing */ }
+    KeyEventKind::Release => { /* key released */ }
+}
+```
+
+Most applications only need to handle `Press`. Filter for it explicitly to avoid processing the same logical key twice:
+
+```rust
+use crossterm::event::{Event, KeyEventKind};
+
+fn handle_events() -> std::io::Result<bool> {
+    match event::read()? {
+        Event::Key(key) if key.kind == KeyEventKind::Press => match key.code {
+            KeyCode::Char('q') => return Ok(true),
+            _ => {}
+        },
+        _ => {}
+    }
+    Ok(false)
+}
+```
+
+`Repeat` and `Release` events are only generated on terminals that support Kitty keyboard protocol. On other terminals only `Press` events are emitted.
+
+## Mouse Events
+
+Enable mouse capture before the event loop:
+
+```rust
+use crossterm::{execute, event::{EnableMouseCapture, DisableMouseCapture}};
+use std::io::stdout;
+
+// Enable on startup
+execute!(stdout(), EnableMouseCapture)?;
+
+// Disable on shutdown (also handled by restore())
+execute!(stdout(), DisableMouseCapture)?;
+```
+
+`MouseEvent` provides the terminal coordinates and the kind of mouse interaction:
+
+```rust
+use crossterm::event::{MouseEvent, MouseEventKind, MouseButton};
+
+fn handle_mouse(ev: MouseEvent) {
+    let col = ev.column; // terminal column (0-based)
+    let row = ev.row;    // terminal row (0-based)
+
+    match ev.kind {
+        MouseEventKind::Down(MouseButton::Left)   => { /* left click */ }
+        MouseEventKind::Down(MouseButton::Right)  => { /* right click */ }
+        MouseEventKind::Down(MouseButton::Middle) => { /* middle click */ }
+        MouseEventKind::Up(btn)                   => { /* button released */ }
+        MouseEventKind::Drag(btn)                 => { /* click-drag */ }
+        MouseEventKind::Moved                     => { /* cursor moved (no button) */ }
+        MouseEventKind::ScrollUp                  => { /* scroll wheel up */ }
+        MouseEventKind::ScrollDown                => { /* scroll wheel down */ }
+        MouseEventKind::ScrollLeft                => { /* horizontal scroll left */ }
+        MouseEventKind::ScrollRight               => { /* horizontal scroll right */ }
+    }
+}
+```
+
+To determine which widget was clicked, compare `ev.column` and `ev.row` against the `Rect` returned by your layout:
+
+```rust
+if sidebar_area.contains(crossterm::event::MouseEvent { column: ev.column, row: ev.row, .. }) {
+    // click was inside the sidebar
+}
+```
+
+`Rect` exposes a `contains(Position)` method for this purpose.
+
+## Resize Events
+
+A `Resize(cols, rows)` event arrives whenever the terminal window is resized. Do not use the dimensions in the event for layout calculations—they may be stale if multiple resize events were coalesced. Instead, simply continue the event loop and let the next `draw()` call query the current size from the backend:
+
+```rust
+use crossterm::event::{Event, KeyCode, KeyEventKind};
+
+fn run(terminal: &mut ratatui::DefaultTerminal) -> std::io::Result<()> {
+    loop {
+        terminal.draw(|frame| render(frame))?;
+
+        match event::read()? {
+            Event::Resize(_, _) => {
+                // The next draw() call will autoresize and re-render.
+            }
+            Event::Key(key) if key.kind == KeyEventKind::Press => {
+                if key.code == KeyCode::Char('q') {
+                    return Ok(());
+                }
+            }
+            _ => {}
+        }
+    }
+}
+```
+
+## Complete Event Handling Example
+
+The following is the full event handling function from the Ratatui crate documentation, showing the canonical pattern for a keyboard-driven app:
+
+```rust
+use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind};
+
+fn handle_events() -> std::io::Result<bool> {
+    match event::read()? {
+        Event::Key(key) if key.kind == KeyEventKind::Press => match key.code {
+            KeyCode::Char('q') => return Ok(true),
+            // handle other key events
+            _ => {}
+        },
+        // handle other events
+        _ => {}
+    }
+    Ok(false)
+}
+```
+
+## Async Event Handling
+
+For async applications (using `tokio` or `async-std`), Crossterm provides `EventStream`, which implements `futures::Stream<Item = io::Result<Event>>`:
+
+```rust
+use crossterm::event::{Event, EventStream, KeyCode};
+use futures::StreamExt;
+
+async fn run(terminal: &mut ratatui::DefaultTerminal) -> std::io::Result<()> {
+    let mut events = EventStream::new();
+
+    loop {
+        terminal.draw(|frame| render(frame))?;
+
+        if let Some(Ok(event)) = events.next().await {
+            if let Event::Key(key) = event {
+                if key.code == KeyCode::Char('q') {
+                    return Ok(());
+                }
+            }
+        }
+    }
+}
+```
+
+<Tip>
+The `EventStream` type requires enabling the `event-stream` feature in Crossterm: `crossterm = { version = "...", features = ["event-stream"] }`.
+</Tip>
+
+## Accessing Crossterm from the Ratatui Crate
+
+The `ratatui` crate re-exports Crossterm so you don't need to add it as a separate dependency when using `ratatui`'s default feature set:
+
+```rust
+use ratatui::crossterm::event::{self, Event, KeyCode};
+```
+
+Or add it explicitly for its feature flags:
+
+```toml
+[dependencies]
+ratatui = "0.30"
+crossterm = { version = "0.28", features = ["event-stream"] }
+```

@@ -1,0 +1,122 @@
+---
+title: "Ratatui Widgets: Built-in Components Overview"
+sidebarTitle: "Overview"
+description: "A guide to all of Ratatui's built-in widgets — from borders and text to charts, tables, and canvas drawing — with links to detailed docs for each widget."
+---
+
+Ratatui ships with a comprehensive set of ready-to-use widgets that cover the majority of terminal
+UI patterns. Every widget is composable, styleable, and designed to work naturally with Ratatui's
+layout and rendering pipeline. Whether you need a simple bordered container, an interactive
+scrollable list, or a full cartesian chart, there is a built-in widget for the job.
+
+All widgets are re-exported from `ratatui::widgets`, so a single import covers everything:
+
+```rust
+use ratatui::widgets::{Block, Paragraph, List, Table, Chart, /* … */};
+```
+
+## Widget Catalog
+
+<CardGroup cols={2}>
+  <Card title="Block" icon="square" href="/widgets/block">
+    The universal container widget. Draws borders, titles, and padding around any other widget.
+    Almost every other widget accepts an optional `Block` to frame its content.
+  </Card>
+  <Card title="Paragraph" icon="align-left" href="/widgets/paragraph">
+    Renders a block of styled, optionally wrapped text. Supports scroll offsets, alignment, and
+    rich inline styling via `Line` and `Span`.
+  </Card>
+  <Card title="List" icon="list" href="/widgets/list">
+    Displays a vertical list of items with optional keyboard-driven selection via `ListState`.
+    Supports highlight styles, symbols, scroll padding, and direction reversal.
+  </Card>
+  <Card title="Table" icon="table" href="/widgets/table">
+    Renders multi-column tabular data with an optional header and footer. Fully stateful via
+    `TableState` with row, column, and cell-level selection highlighting.
+  </Card>
+  <Card title="Chart" icon="chart-line" href="/widgets/chart">
+    Plots one or more datasets in a cartesian coordinate system. Supports Line, Scatter, Bar, and
+    Area graph types, with configurable axes, labels, and multiple marker styles.
+  </Card>
+  <Card title="Other Widgets" icon="grid-2" href="/widgets/other-widgets">
+    BarChart, Gauge, LineGauge, Sparkline, Tabs, Scrollbar, Canvas, Clear, Fill, Calendar,
+    RatatuiLogo, and RatatuiMascot — all covered with code snippets.
+  </Card>
+</CardGroup>
+
+## Widget Quick-Reference
+
+| Widget | Stateful | Primary use case |
+|---|---|---|
+| [`Block`](/widgets/block) | No | Borders, titles, and padding around other widgets |
+| [`Paragraph`](/widgets/paragraph) | No | Wrapped, scrollable, aligned rich text |
+| [`List`](/widgets/list) | Yes (`ListState`) | Scrollable, selectable item lists |
+| [`Table`](/widgets/table) | Yes (`TableState`) | Multi-column tabular data with selection |
+| [`Chart`](/widgets/chart) | No | Cartesian line/scatter/bar graphs |
+| `BarChart` | No | Categorical bar charts with grouping |
+| `Gauge` | No | Block-fill progress bar |
+| `LineGauge` | No | Single-line progress bar |
+| `Sparkline` | No | Compact data trend visualisation |
+| `Tabs` | No | Horizontal tab bar |
+| `Scrollbar` | Yes (`ScrollbarState`) | Decorative/interactive scrollbar overlay |
+| `Canvas` | No | Free-form shape drawing |
+| `Clear` | No | Erase an area (used for pop-ups) |
+| `Fill` | No | Paint every cell with a single symbol |
+| `calendar::Monthly` | No | Single-month calendar view |
+| `RatatuiLogo` | No | Ratatui logo mark |
+| `RatatuiMascot` | No | Ratatui mascot character |
+
+## Stateful vs. Stateless Widgets
+
+Most widgets are **stateless** — you construct them fresh each frame with the data you want to
+display and call `frame.render_widget(widget, area)`.
+
+A handful of widgets are **stateful**: they track scroll position, selection index, or other
+interactive state that must live outside the render function. These implement `StatefulWidget` and
+are rendered with `frame.render_stateful_widget(widget, area, &mut state)`.
+
+```rust
+// Stateless — constructed and rendered each frame
+frame.render_widget(Paragraph::new("Hello!"), area);
+
+// Stateful — state lives in your App struct
+frame.render_stateful_widget(list, area, &mut self.list_state);
+```
+
+<Tip>
+  Store stateful widget state (e.g. `ListState`, `TableState`, `ScrollbarState`) in your
+  application struct, not inside the render function. Constructing a fresh state every frame
+  discards the scroll position and selection.
+</Tip>
+
+## Feature Flags
+
+The `calendar::Monthly` widget is behind the **`widget-calendar`** feature flag. It is not
+included in the default feature set because it pulls in the [`time`](https://crates.io/crates/time)
+crate as a dependency.
+
+Enable it in `Cargo.toml`:
+
+```toml
+[dependencies]
+ratatui = { version = "*", features = ["widget-calendar"] }
+```
+
+All other widgets described in this section are available without any additional feature flags.
+
+## Using `ratatui-widgets` Directly
+
+Most applications depend on the top-level `ratatui` crate, which re-exports everything. If you are
+building a widget library or want finer-grained dependencies, you can depend on the
+`ratatui-widgets` sub-crate directly:
+
+```toml
+[dependencies]
+ratatui-widgets = "*"
+```
+
+<Note>
+  The crate published as `ratatui-widgets` on crates.io is the official sub-crate extracted from
+  the Ratatui workspace in v0.30.0. An older, unrelated crate previously used that name and has
+  since moved to `tui-framework-experiment`.
+</Note>

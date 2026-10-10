@@ -1,0 +1,258 @@
+---
+title: "Terminal: Lifecycle, Viewports, and Drawing"
+sidebarTitle: "Terminal"
+description: "How Ratatui initializes, configures, and tears down the terminal—covering DefaultTerminal, Viewport modes, draw passes, raw mode, and panic hooks."
+---
+
+The `Terminal` struct is the top-level handle between your application and the physical terminal device. It manages two internal buffers (a double-buffering scheme), owns the backend, tracks the viewport, and drives every draw cycle. Almost every Ratatui application touches `Terminal` through the convenience functions exposed at the crate root—`run()`, `init()`, and `restore()`—though direct construction is still available when you need full control.
+
+## Choosing an Initialization Path
+
+Ratatui offers several initialization helpers to match different application shapes. Start with the simplest one that fits and reach for a lower-level option only when you need it.
+
+<Steps>
+
+### `run()` — simplest path
+
+`run()` initializes the terminal, calls your closure, and restores terminal state when the closure returns. It sets up raw mode, enters the alternate screen, installs a panic hook, and cleans everything up automatically:
+
+```rust
+use crossterm::event;
+
+fn main() -> std::io::Result<()> {
+    ratatui::run(|terminal| {
+        loop {
+            terminal.draw(|frame| frame.render_widget("Hello World!", frame.area()))?;
+            if event::read()?.is_key_press() {
+                break Ok(());
+            }
+        }
+    })
+}
+```
+
+### `init()` / `restore()` — manual control
+
+Use `init()` and `restore()` when you need setup and teardown to happen around code that lives outside the application closure—for example, when you want to initialize before building application state:
+
+```rust
+fn main() -> std::io::Result<()> {
+    let mut terminal = ratatui::init();
+    let result = run_app(&mut terminal);
+    ratatui::restore();
+    result
+}
+
+fn run_app(terminal: &mut ratatui::DefaultTerminal) -> std::io::Result<()> {
+    loop {
+        terminal.draw(render)?;
+        if should_quit()? {
+            break Ok(());
+        }
+    }
+}
+
+fn render(frame: &mut ratatui::Frame) {
+    use ratatui::widgets::Paragraph;
+    frame.render_widget(Paragraph::new("Hello!"), frame.area());
+}
+
+fn should_quit() -> std::io::Result<bool> {
+    Ok(crossterm::event::read()?.is_key_press())
+}
+```
+
+### `init_with_options()` — custom viewport
+
+When you need an inline or fixed viewport instead of fullscreen, pass a `TerminalOptions`:
+
+```rust
+use ratatui::{TerminalOptions, Viewport};
+
+fn main() -> std::io::Result<()> {
+    let options = TerminalOptions {
+        viewport: Viewport::Inline(10),
+    };
+    let mut terminal = ratatui::init_with_options(options);
+    // ... run the app ...
+    ratatui::restore();
+    Ok(())
+}
+```
+
+### `try_init()` / `try_restore()` — explicit error handling
+
+The `try_*` variants return `io::Result` instead of panicking, giving you full control over initialization failures:
+
+```rust
+fn main() -> std::io::Result<()> {
+    let mut terminal = ratatui::try_init()?;
+    // ... run the app ...
+    ratatui::try_restore()?;
+    Ok(())
+}
+```
+
+</Steps>
+
+## `DefaultTerminal` Type Alias
+
+`DefaultTerminal` is a type alias defined in the `init` module:
+
+```rust
+pub type DefaultTerminal = Terminal<CrosstermBackend<Stdout>>;
+```
+
+It is a `Terminal` backed by `CrosstermBackend` writing to standard output. All of the convenience initialization functions return this type. For a different backend or output stream, construct `Terminal` directly with the backend of your choice.
+
+## Viewport Modes
+
+The `Viewport` enum controls what area of the screen Ratatui draws into and what `Frame::area()` returns inside a draw callback.
+
+<CardGroup cols={3}>
+  <Card title="Fullscreen" icon="maximize">
+    Owns the entire terminal surface. The viewport starts at `(0, 0)` and is automatically resized each draw pass. This is the default.
+  </Card>
+  <Card title="Inline(height)" icon="rows">
+    Renders a fixed number of rows anchored to the current cursor row. Useful for CLI tools that share the terminal with earlier output.
+  </Card>
+  <Card title="Fixed(Rect)" icon="square">
+    Renders into a specific rectangle. Not automatically resized—call `Terminal::resize` yourself when the layout changes.
+  </Card>
+</CardGroup>
+
+```rust
+use ratatui::{TerminalOptions, Viewport};
+use ratatui::layout::Rect;
+
+// Fullscreen (default)
+let options = TerminalOptions { viewport: Viewport::Fullscreen };
+
+// 8-row inline UI
+let options = TerminalOptions { viewport: Viewport::Inline(8) };
+
+// Fixed rectangle at column 10, row 5, 40×10
+let options = TerminalOptions {
+    viewport: Viewport::Fixed(Rect::new(10, 5, 40, 10)),
+};
+```
+
+<Warning>
+Always base layout calculations on `frame.area()` rather than assuming `(0, 0)` as the origin. Inline and fixed viewports have non-zero origins, so code that hardcodes `(0, 0)` will render incorrectly.
+</Warning>
+
+## Drawing Frames
+
+`Terminal::draw()` is the primary entry point for rendering. It accepts a closure that receives a `&mut Frame`, runs the closure to populate the internal buffer, diffs the buffer against the previous frame, writes only the changed cells to the terminal, and returns a `CompletedFrame`.
+
+```rust
+use ratatui::Frame;
+use ratatui::widgets::Paragraph;
+
+fn run(terminal: &mut ratatui::DefaultTerminal) -> std::io::Result<()> {
+    loop {
+        terminal.draw(|frame| render(frame))?;
+        if handle_events()? {
+            break Ok(());
+        }
+    }
+}
+
+fn render(frame: &mut Frame) {
+    let text = Paragraph::new("Hello World!");
+    frame.render_widget(text, frame.area());
+}
+
+fn handle_events() -> std::io::Result<bool> {
+    Ok(crossterm::event::read()?.is_key_press())
+}
+```
+
+### What Happens During a Draw Pass
+
+Every call to `Terminal::draw()` executes these steps in order:
+
+1. **Autoresize** — queries the backend for the current terminal size; if it changed, resizes internal buffers and clears the screen.
+2. **Render callback** — calls your closure with a `Frame` reference; your code writes into the current buffer.
+3. **Buffer diff** — compares the current buffer against the previous buffer.
+4. **Flush to backend** — writes only the changed cells to the terminal.
+5. **Cursor update** — shows or hides the cursor based on `Frame::set_cursor_position`.
+6. **Buffer swap** — swaps current and previous buffers to prepare for the next frame.
+7. **Backend flush** — flushes any buffered I/O at the backend level.
+8. **Return `CompletedFrame`** — returns a reference to the buffer just rendered.
+
+<Info>
+`Terminal::try_draw()` is identical but accepts a closure returning `Result`. If the closure returns an error, the terminal state (buffers, cursor, frame count) is left unchanged and the error is propagated.
+</Info>
+
+### Handling Resize
+
+Ratatui does **not** automatically re-render when a resize event arrives. Your event loop should handle the `Event::Resize` event by continuing the loop and calling `draw()` again. On the next draw pass Ratatui queries the backend for the current size:
+
+```rust
+use crossterm::event::{self, Event, KeyCode, KeyEventKind};
+
+fn run(terminal: &mut ratatui::DefaultTerminal) -> std::io::Result<()> {
+    loop {
+        terminal.draw(|frame| {
+            frame.render_widget("Press q to quit", frame.area());
+        })?;
+
+        match event::read()? {
+            Event::Resize(_, _) => {
+                // Just continue — the next draw pass reads the new size.
+            }
+            Event::Key(key)
+                if key.kind == KeyEventKind::Press && key.code == KeyCode::Char('q') =>
+            {
+                break Ok(());
+            }
+            _ => {}
+        }
+    }
+}
+```
+
+Fixed viewports are **not** automatically updated on resize. Call `terminal.resize(new_rect)` explicitly if the fixed area should change.
+
+## Raw Mode and Alternate Screen
+
+`init()` and `run()` enable two terminal modes automatically:
+
+| Mode | What it does |
+|------|-------------|
+| **Raw mode** | Disables line buffering and echoing so keystrokes arrive immediately without pressing Enter |
+| **Alternate screen** | Switches to a secondary screen buffer that is discarded on exit, leaving the user's scrollback history intact |
+
+`restore()` disables raw mode first (because it has more visible side effects), then leaves the alternate screen. The order matters—disabling raw mode first avoids leaving the terminal in an inconsistent state if the second step fails.
+
+## Panic Hook
+
+All initialization functions install a panic hook that calls `restore()` before the original panic handler runs. This ensures the terminal is left in a usable state even if the application crashes:
+
+```rust
+fn set_panic_hook() {
+    let hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        restore();
+        hook(info);
+    }));
+}
+```
+
+<Warning>
+Call `init()` or `run()` **after** installing any other custom panic hooks. The hook installed by Ratatui calls `restore()` first and then invokes the previously registered hook, so the hook that was installed last runs first.
+</Warning>
+
+## Function Reference
+
+| Function | Alternate Screen | Raw Mode | Error handling | When to use |
+|----------|:-:|:-:|---|---|
+| `run()` | ✓ | ✓ | Auto-cleanup | Simple fullscreen apps |
+| `run_with_options()` | ✗ | ✓ | Auto-cleanup | Custom viewport apps |
+| `init()` | ✓ | ✓ | Panic | Standard fullscreen apps |
+| `try_init()` | ✓ | ✓ | `Result` | Fullscreen with error handling |
+| `init_with_options()` | ✗ | ✓ | Panic | Custom viewport apps |
+| `try_init_with_options()` | ✗ | ✓ | `Result` | Custom viewport with error handling |
+| `restore()` | — | — | Print to stderr | Cleanup (errors non-fatal) |
+| `try_restore()` | — | — | `Result` | Cleanup with error handling |

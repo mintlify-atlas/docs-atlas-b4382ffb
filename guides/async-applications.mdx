@@ -1,0 +1,318 @@
+---
+title: "Building Async Applications with Ratatui"
+sidebarTitle: "Async Apps"
+description: "Combine Ratatui's synchronous rendering model with Tokio, async event streams, channels, and tokio::select! to build responsive TUI apps."
+---
+
+Ratatui itself is entirely synchronous — `terminal.draw(...)` blocks the calling thread while it
+diffs and flushes the frame. This is intentional: rendering is fast and keeping it on a single
+thread avoids data-race issues. Async patterns enter the picture for everything *around* rendering:
+reading keyboard and mouse events, fetching data from network APIs, watching files, and waiting on
+timers. The standard approach is to run Ratatui's draw loop inside a Tokio task and drive it
+forward with `tokio::select!` or a message-passing channel.
+
+## The async event loop pattern
+
+The most common architecture has three moving parts:
+
+1. **An event task** — reads terminal events (keys, mouse, resize) from an async stream and sends
+   them over a channel.
+2. **A timer** — a `tokio::time::interval` that triggers redraws at a fixed frame rate.
+3. **The main loop** — `tokio::select!` races the timer and the event receiver, updates app
+   state on each event, and calls `terminal.draw` on each timer tick.
+
+```rust
+use std::time::Duration;
+
+use color_eyre::Result;
+use crossterm::event::{Event, EventStream, KeyCode};
+use ratatui::{DefaultTerminal, Frame};
+use tokio_stream::StreamExt as _;
+
+#[tokio::main]
+async fn main() -> Result<()> {
+    color_eyre::install()?;
+    let terminal = ratatui::init();
+    let result = App::default().run(terminal).await;
+    ratatui::restore();
+    result
+}
+
+#[derive(Default)]
+struct App {
+    should_quit: bool,
+    counter: u64,
+}
+
+impl App {
+    const FRAMES_PER_SECOND: f32 = 60.0;
+
+    async fn run(mut self, mut terminal: DefaultTerminal) -> Result<()> {
+        let period = Duration::from_secs_f32(1.0 / Self::FRAMES_PER_SECOND);
+        let mut interval = tokio::time::interval(period);
+        let mut events = EventStream::new();
+
+        while !self.should_quit {
+            tokio::select! {
+                // Redraw on every timer tick.
+                _ = interval.tick() => {
+                    terminal.draw(|frame| self.render(frame))?;
+                }
+                // Handle the next terminal event.
+                Some(Ok(event)) = events.next() => {
+                    self.handle_event(&event);
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn render(&self, frame: &mut Frame) {
+        let text = format!("Counter: {}  (press q to quit)", self.counter);
+        frame.render_widget(text.as_str(), frame.area());
+    }
+
+    fn handle_event(&mut self, event: &Event) {
+        if let Some(key) = event.as_key_press_event() {
+            match key.code {
+                KeyCode::Char('q') | KeyCode::Esc => self.should_quit = true,
+                KeyCode::Char('j') | KeyCode::Down => self.counter += 1,
+                KeyCode::Char('k') | KeyCode::Up => self.counter = self.counter.saturating_sub(1),
+                _ => {}
+            }
+        }
+    }
+}
+```
+
+<Tip>
+  `EventStream` is provided by `crossterm` with the `event-stream` feature enabled, and
+  `tokio_stream::StreamExt` is re-exported from the `tokio-stream` crate. Add both to your
+  `Cargo.toml`:
+
+  ```toml
+  [dependencies]
+  crossterm = { version = "0.29", features = ["event-stream"] }
+  tokio      = { version = "1",   features = ["macros", "rt-multi-thread", "time"] }
+  tokio-stream = "0.1"
+  ```
+</Tip>
+
+## Loading data in the background with shared state
+
+For widgets that fetch data from a remote source — a GitHub API, a database query, a file watcher
+— the recommended approach is to spawn a background Tokio task and share the result through an
+`Arc<RwLock<...>>`. The main render loop always reads the latest available state without blocking.
+
+The following is adapted from the `async-github` example in the Ratatui repository:
+
+```rust
+use std::sync::{Arc, RwLock};
+
+use ratatui::buffer::Buffer;
+use ratatui::layout::Rect;
+use ratatui::style::Stylize;
+use ratatui::text::Line;
+use ratatui::widgets::{Block, StatefulWidget, Table, TableState, Widget};
+
+#[derive(Debug, Clone, Default)]
+struct DataWidget {
+    state: Arc<RwLock<DataWidgetState>>,
+}
+
+#[derive(Debug, Default)]
+struct DataWidgetState {
+    items: Vec<String>,
+    loading_state: LoadingState,
+    table_state: TableState,
+}
+
+#[derive(Debug, Default, Clone)]
+enum LoadingState {
+    #[default]
+    Idle,
+    Loading,
+    Loaded,
+    Error(String),
+}
+
+impl DataWidget {
+    /// Spawn a background task. Cloning the widget clones the Arc, so the
+    /// task shares the same state as the widget in the render loop.
+    fn start_loading(&self) {
+        let this = self.clone();
+        tokio::spawn(async move {
+            this.state.write().unwrap().loading_state = LoadingState::Loading;
+            match fetch_data().await {
+                Ok(items) => {
+                    let mut s = this.state.write().unwrap();
+                    s.items = items;
+                    s.loading_state = LoadingState::Loaded;
+                }
+                Err(e) => {
+                    this.state.write().unwrap().loading_state =
+                        LoadingState::Error(e.to_string());
+                }
+            }
+        });
+    }
+}
+
+// The render method reads the shared state without blocking the draw loop.
+impl Widget for &DataWidget {
+    fn render(self, area: Rect, buf: &mut Buffer) {
+        let mut state = self.state.write().unwrap();
+        let status = Line::from(format!("{:?}", state.loading_state)).right_aligned();
+        let block = Block::bordered().title("Data").title(status);
+        block.render(area, buf);
+    }
+}
+
+async fn fetch_data() -> Result<Vec<String>, Box<dyn std::error::Error>> {
+    // ...network call...
+    Ok(vec!["item one".into(), "item two".into()])
+}
+```
+
+<Note>
+  Each widget in an application can have its own background task and its own
+  `Arc<RwLock<...>>` state. The render loop never awaits; it just reads the latest snapshot of
+  each widget's state on every frame tick.
+</Note>
+
+## Using channels for one-way message passing
+
+When you want to decouple the event source from the application state more cleanly, use a Tokio
+`mpsc` channel. A dedicated event task reads from the terminal and sends typed messages; the main
+loop receives them and updates state.
+
+```rust
+use tokio::sync::mpsc;
+use crossterm::event::{Event, EventStream, KeyCode};
+use tokio_stream::StreamExt as _;
+
+#[derive(Debug)]
+enum AppEvent {
+    Key(crossterm::event::KeyEvent),
+    Resize(u16, u16),
+    Tick,
+}
+
+async fn event_task(tx: mpsc::UnboundedSender<AppEvent>) {
+    let mut events = EventStream::new();
+    while let Some(Ok(event)) = events.next().await {
+        match event {
+            Event::Key(k) => { let _ = tx.send(AppEvent::Key(k)); }
+            Event::Resize(w, h) => { let _ = tx.send(AppEvent::Resize(w, h)); }
+            _ => {}
+        }
+    }
+}
+
+async fn tick_task(tx: mpsc::UnboundedSender<AppEvent>) {
+    let mut interval = tokio::time::interval(std::time::Duration::from_millis(16));
+    loop {
+        interval.tick().await;
+        let _ = tx.send(AppEvent::Tick);
+    }
+}
+
+#[tokio::main]
+async fn main() -> color_eyre::Result<()> {
+    let terminal = ratatui::init();
+    let (tx, mut rx) = mpsc::unbounded_channel::<AppEvent>();
+
+    // Spawn background tasks.
+    tokio::spawn(event_task(tx.clone()));
+    tokio::spawn(tick_task(tx));
+
+    let mut should_quit = false;
+    while !should_quit {
+        if let Some(event) = rx.recv().await {
+            match event {
+                AppEvent::Tick => {
+                    terminal.draw(|f| f.render_widget("Hello", f.area()))?;
+                }
+                AppEvent::Key(k) if k.code == KeyCode::Char('q') => {
+                    should_quit = true;
+                }
+                _ => {}
+            }
+        }
+    }
+
+    ratatui::restore();
+    Ok(())
+}
+```
+
+## Drawing from an async context
+
+`terminal.draw(...)` is a synchronous call — it blocks until the frame is flushed. Because
+Ratatui uses `std::io::Write` internally, calling it from inside a Tokio task works fine as long
+as the task is allowed to block (i.e., you are in a `tokio::task::spawn_blocking` context or a
+multi-threaded runtime where blocking for a few milliseconds per frame is acceptable). The
+`tokio::select!` pattern shown above achieves this naturally: the draw call happens on the
+async task's thread and is fast enough that it does not starve the executor.
+
+<Warning>
+  Do not hold a lock on shared application state across an `await` point or across the
+  `terminal.draw(...)` call. Take a snapshot of the data you need, drop the lock, then render.
+  Holding locks across frames can deadlock the background task that writes new data.
+</Warning>
+
+## Debugging async applications with tracing
+
+Ratatui takes over `stdout` during rendering, which makes `println!` unusable for debug output.
+Use the `tracing` crate with a file appender instead:
+
+```rust
+use std::fs::File;
+
+use tracing::{Level, debug, info};
+use tracing_appender::non_blocking;
+use tracing_subscriber::EnvFilter;
+
+fn init_tracing() -> color_eyre::Result<tracing_appender::non_blocking::WorkerGuard> {
+    let log_file = File::create("app.log")?;
+    let (writer, guard) = non_blocking(log_file);
+    tracing_subscriber::fmt()
+        .with_env_filter(EnvFilter::from_default_env())
+        .with_writer(writer)
+        .init();
+    Ok(guard)
+}
+
+// In main:
+// let _guard = init_tracing()?;
+// info!("Application started");
+// debug!(counter = state.counter, "frame rendered");
+```
+
+Run with `RUST_LOG=debug cargo run` to emit debug-level logs to `app.log` without interfering
+with the TUI.
+
+<Info>
+  For a widget that renders log messages inside the TUI, consider the
+  [`tui-logger`](https://crates.io/crates/tui-logger) crate from the community. It integrates
+  with the `log` façade and renders a scrollable log widget that coexists with your other UI.
+</Info>
+
+## Complete Cargo.toml for an async application
+
+```toml
+[package]
+name    = "my-async-tui"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+color-eyre  = "0.6"
+crossterm   = { version = "0.29", features = ["event-stream"] }
+ratatui     = "0.30"
+tokio       = { version = "1", features = ["macros", "rt-multi-thread", "time", "sync"] }
+tokio-stream = "0.1"
+tracing                 = "0.1"
+tracing-appender        = "0.2"
+tracing-subscriber      = { version = "0.3", features = ["env-filter"] }
+```

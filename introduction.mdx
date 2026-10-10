@@ -1,0 +1,96 @@
+---
+title: "Introduction to Ratatui: Build Terminal UIs in Rust"
+sidebarTitle: "Introduction"
+description: "Ratatui is a Rust crate for building fast, expressive terminal user interfaces using an immediate-mode rendering model and a modular workspace."
+---
+
+Ratatui (_ˌræ.təˈtu.i_) is a Rust crate for cooking up terminal user interfaces (TUIs). It provides a lightweight, composable toolkit of widgets, layouts, and styling primitives for building text-based applications that run entirely inside a terminal — dashboards, CLIs, games, data explorers, and more. Ratatui was forked from the [tui-rs](https://crates.io/crates/tui) crate in 2023 and has since grown into an active, well-maintained project with a vibrant ecosystem.
+
+## How Ratatui Renders
+
+Ratatui is built on **immediate-mode rendering with intermediate buffers**. On every frame your application must describe the entire UI from scratch — you call `terminal.draw(...)`, pass a closure that renders all widgets to a `Frame`, and Ratatui diffs the resulting buffer against the previous frame before flushing only the changed cells to the terminal. There are no retained widget objects that update themselves; your render function is the single source of truth for what appears on screen.
+
+This model keeps the library small and predictable. State lives in your application; Ratatui handles the diffing and the I/O.
+
+<Note>
+  **Which crate should I add as a dependency?**
+
+  - **Building a terminal app?** Add `ratatui`. It re-exports everything you need — widgets, layout, backends, and the `init`/`run` convenience functions — and is the recommended starting point for application developers.
+  - **Publishing a widget library?** Depend on `ratatui-core` instead. It exposes the stable `Widget` trait and core types without pulling in backend or widget implementation crates, keeping your library's dependency footprint minimal.
+</Note>
+
+## The Modular Workspace
+
+Starting with Ratatui 0.30.0 the project was reorganised into a modular workspace. The `ratatui` crate remains the single entry point for applications — it re-exports every piece you need — but the underlying code is split into focused crates that can be depended on individually when necessary.
+
+<CardGroup cols={2}>
+  <Card title="ratatui" icon="box" href="https://crates.io/crates/ratatui">
+    The main crate. Re-exports widgets, layout, backends, and initialization helpers. **Start here for apps.**
+  </Card>
+  <Card title="ratatui-core" icon="cube" href="https://crates.io/crates/ratatui-core">
+    Core traits and types: `Widget`, `Buffer`, `Layout`, `Style`, `Terminal`. The foundation for widget library authors.
+  </Card>
+  <Card title="ratatui-widgets" icon="shapes" href="https://crates.io/crates/ratatui-widgets">
+    All built-in widget implementations (`Paragraph`, `Block`, `Table`, `Chart`, `List`, and more) as a standalone crate.
+  </Card>
+  <Card title="ratatui-macros" icon="code" href="https://crates.io/crates/ratatui-macros">
+    Procedural macros that reduce boilerplate when constructing spans, lines, text, and layout constraints.
+  </Card>
+  <Card title="ratatui-crossterm" icon="terminal" href="https://crates.io/crates/ratatui-crossterm">
+    The default `CrosstermBackend`. Enabled automatically via the `crossterm` feature and works on Linux, macOS, and Windows.
+  </Card>
+  <Card title="Alternative backends" icon="server" href="https://docs.rs/ratatui/latest/ratatui/backend/index.html">
+    `ratatui-termion` (Unix-only), `ratatui-termwiz`, and `ratatui-termina` for specialised backend needs.
+  </Card>
+</CardGroup>
+
+## Key Features
+
+<CardGroup cols={2}>
+  <Card title="Immediate-mode rendering" icon="bolt">
+    Render the full UI on every frame. Ratatui diffs the buffers and sends only changes to the terminal, keeping screen updates fast.
+  </Card>
+  <Card title="Flexible layout engine" icon="table-columns">
+    Compose responsive layouts with `Layout::horizontal` and `Layout::vertical` using constraint types: `Length`, `Min`, `Max`, `Percentage`, `Ratio`, and `Fill`.
+  </Card>
+  <Card title="Rich widget library" icon="layer-group">
+    Paragraph, Block, List, Table, Chart, Gauge, Sparkline, Canvas, Calendar, and more — all composable and styleable.
+  </Card>
+  <Card title="Expressive text styling" icon="palette">
+    Style text with foreground/background colours, bold, italic, underline, strikethrough, and more using the `Stylize` trait's shorthand syntax.
+  </Card>
+  <Card title="Multiple backends" icon="plug">
+    Crossterm (default, cross-platform), Termion, Termwiz, and Termina backends. Swap backends by enabling the relevant Cargo feature.
+  </Card>
+  <Card title="Panic-safe initialization" icon="shield-check">
+    `ratatui::init()` and `ratatui::run()` install a panic hook that restores the terminal before the process unwinds — your shell stays clean even on crashes.
+  </Card>
+</CardGroup>
+
+## Application Structure
+
+Every Ratatui application follows the same three-phase loop:
+
+1. **Initialize** the terminal — enter the alternate screen, enable raw mode, install the panic hook.
+2. **Loop** — draw the UI, handle input events, update application state.
+3. **Restore** the terminal — leave the alternate screen, disable raw mode.
+
+The `ratatui::run()` function handles phases 1 and 3 automatically. You provide the loop. See the [Quickstart](/quickstart) guide to write your first app in under a minute.
+
+## Who Should Use Which Crate?
+
+| Scenario | Recommended dependency |
+|---|---|
+| Building a terminal application | `ratatui` |
+| Publishing a reusable widget library | `ratatui-core` |
+| Only need the built-in widgets as a dependency | `ratatui-widgets` |
+| Need backend-specific APIs directly | `ratatui-crossterm`, `ratatui-termion`, `ratatui-termina`, or `ratatui-termwiz` |
+| Want `constraint!` / `line!` / `text!` macros | `ratatui-macros` (already included via the `macros` feature in `ratatui`) |
+
+## Getting Help
+
+- [Discord](https://discord.gg/pMCEU9hNEj) — real-time chat with the community
+- [Forum](https://forum.ratatui.rs) — longer-form questions and discussion
+- [Matrix](https://matrix.to/#/#ratatui:matrix.org) — Matrix bridge to the Discord
+- [GitHub Issues](https://github.com/ratatui/ratatui/issues) — bug reports and feature requests
+- [API Docs](https://docs.rs/ratatui) — full reference documentation on docs.rs

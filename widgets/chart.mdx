@@ -1,0 +1,215 @@
+---
+title: "Chart Widget: Cartesian Graphs and Datasets in Ratatui"
+sidebarTitle: "Chart"
+description: "Plot line, scatter, bar, and area charts in Ratatui's Chart widget — covering Dataset, Axis, GraphType, marker styles, legends, and composing multiple datasets."
+---
+
+`Chart` renders one or more datasets in a cartesian coordinate system directly in the terminal.
+Each dataset is a slice of `(f64, f64)` points plotted against configurable X and Y axes. You can
+mix graph types (lines, scatter, bars, filled areas) across datasets in the same widget, label the
+axes with bounds and tick marks, and control the marker characters used to draw each series.
+
+## Core Types
+
+| Type | Purpose |
+|---|---|
+| `Dataset` | A single data series — points, graph type, marker, name, and style |
+| `Axis` | Configuration for the X or Y axis — title, bounds, labels, style |
+| `GraphType` | How to draw the dataset: `Scatter`, `Line`, `Bar`, or `Area` |
+| `Chart` | The widget that combines datasets, axes, and an optional block |
+
+## Creating a Dataset
+
+```rust
+use ratatui::style::Stylize;
+use ratatui::symbols::Marker;
+use ratatui::widgets::{Dataset, GraphType};
+
+let data: Vec<(f64, f64)> = (0..=100)
+    .map(|x| (x as f64, (x as f64 * 0.1).sin() * 10.0))
+    .collect();
+
+let dataset = Dataset::default()
+    .name("sin(x)")           // Appears in the legend
+    .data(&data)              // &[(f64, f64)]
+    .marker(Marker::Braille)  // Braille | Dot | Block | Bar | HalfBlock
+    .graph_type(GraphType::Line)
+    .cyan();
+```
+
+### GraphType Variants
+
+```rust
+use ratatui::widgets::GraphType;
+
+GraphType::Scatter  // Plot each point independently (default)
+GraphType::Line     // Draw a line connecting consecutive points
+GraphType::Bar      // Draw a vertical bar from the x-axis to each point
+GraphType::Area     // Line graph with the area below the line filled
+```
+
+### Marker Styles
+
+| Marker | Characters | Resolution |
+|---|---|---|
+| `Marker::Braille` | `⠁⠂⠄⡀…` | 2×4 sub-cell dots — highest resolution |
+| `Marker::Dot` | `•` | 1 cell per point |
+| `Marker::Block` | `█` | 1 cell, fills with background colour too |
+| `Marker::Bar` | `▄` | 1×2 half-block |
+| `Marker::HalfBlock` | `▀▄█` | 1×2 per cell |
+
+<Note>
+  `Marker::Braille` requires a terminal font that includes the Unicode Braille Patterns block
+  (U+2800–U+28FF). It is the default and provides the sharpest curves.
+</Note>
+
+## Configuring Axes
+
+`Axis` sets the visible range (`bounds`) and optional tick labels. Provide at least two labels —
+they are placed at the start and end of the axis:
+
+```rust
+use ratatui::style::Stylize;
+use ratatui::widgets::Axis;
+
+let x_axis = Axis::default()
+    .title("Time (s)".cyan())
+    .style(Style::new().gray())
+    .bounds([0.0, 100.0])
+    .labels(["0".bold(), "50".into(), "100".bold()]);
+
+let y_axis = Axis::default()
+    .title("Amplitude".cyan())
+    .style(Style::new().gray())
+    .bounds([-10.0, 10.0])
+    .labels(["-10".bold(), "0".into(), "10".bold()]);
+```
+
+<Warning>
+  Giving the axis more than 3 labels currently places the middle labels at incorrect positions
+  (GitHub issue #334). Use exactly 2 or 3 labels for correct rendering.
+</Warning>
+
+## Building the Chart
+
+```rust
+use ratatui::widgets::{Block, Chart};
+
+let chart = Chart::new(vec![dataset])
+    .block(Block::bordered().title("Signal"))
+    .x_axis(x_axis)
+    .y_axis(y_axis);
+```
+
+## Multiple Datasets
+
+Pass multiple `Dataset` values to overlay series. Each named dataset appears as an entry in the
+automatic legend:
+
+```rust
+use ratatui::style::Stylize;
+use ratatui::symbols::Marker;
+use ratatui::widgets::{Chart, Dataset, GraphType};
+
+let sin_data: Vec<(f64, f64)> = (0..=100)
+    .map(|x| (x as f64, (x as f64 * 0.1).sin() * 10.0))
+    .collect();
+
+let cos_data: Vec<(f64, f64)> = (0..=100)
+    .map(|x| (x as f64, (x as f64 * 0.1).cos() * 10.0))
+    .collect();
+
+let datasets = vec![
+    Dataset::default()
+        .name("sin")
+        .data(&sin_data)
+        .marker(Marker::Braille)
+        .graph_type(GraphType::Line)
+        .cyan(),
+    Dataset::default()
+        .name("cos")
+        .data(&cos_data)
+        .marker(Marker::Braille)
+        .graph_type(GraphType::Line)
+        .yellow(),
+];
+
+let chart = Chart::new(datasets)
+    .x_axis(x_axis)
+    .y_axis(y_axis);
+```
+
+## Legend Position
+
+By default the legend appears in the top-right corner. Change it with `Chart::legend_position`:
+
+```rust
+use ratatui::widgets::{Chart, LegendPosition};
+
+let chart = Chart::new(datasets)
+    .legend_position(Some(LegendPosition::BottomLeft))
+    .x_axis(x_axis)
+    .y_axis(y_axis);
+
+// Hide the legend entirely
+let chart = Chart::new(datasets)
+    .legend_position(None)
+    .x_axis(x_axis)
+    .y_axis(y_axis);
+```
+
+## Complete Example
+
+```rust
+use ratatui::Frame;
+use ratatui::style::{Style, Stylize};
+use ratatui::symbols::Marker;
+use ratatui::widgets::{Axis, Block, BorderType, Chart, Dataset, GraphType};
+
+fn render(frame: &mut Frame) {
+    let area = frame.area();
+
+    // Build data
+    let data: Vec<(f64, f64)> = (0..=200)
+        .map(|x| {
+            let t = x as f64 * 0.05;
+            (t, t.sin() * 8.0)
+        })
+        .collect();
+
+    let dataset = Dataset::default()
+        .name("sin(t)")
+        .data(&data)
+        .marker(Marker::Braille)
+        .graph_type(GraphType::Line)
+        .style(Style::new().cyan());
+
+    let x_axis = Axis::default()
+        .title("t")
+        .style(Style::new().dark_gray())
+        .bounds([0.0, 10.0])
+        .labels(["0.0".bold(), "5.0".into(), "10.0".bold()]);
+
+    let y_axis = Axis::default()
+        .title("sin(t)")
+        .style(Style::new().dark_gray())
+        .bounds([-10.0, 10.0])
+        .labels(["-10".bold(), "0".into(), "10".bold()]);
+
+    let chart = Chart::new(vec![dataset])
+        .block(
+            Block::bordered()
+                .title(" Sine Wave ")
+                .border_type(BorderType::Rounded),
+        )
+        .x_axis(x_axis)
+        .y_axis(y_axis);
+
+    frame.render_widget(chart, area);
+}
+```
+
+<Tip>
+  The Y axis in `Chart` follows mathematical convention: values increase upward, not downward. This
+  is the opposite of terminal coordinates where row 0 is at the top.
+</Tip>

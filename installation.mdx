@@ -1,0 +1,241 @@
+---
+title: "Installing Ratatui: Dependencies, Features, and Templates"
+sidebarTitle: "Installation"
+description: "Add ratatui to your Rust project, choose a backend, enable optional feature flags for widgets and serialization, and scaffold with cargo-generate."
+---
+
+Adding Ratatui to a Rust project takes a single command. Most applications need only the `ratatui` crate — it brings in the default Crossterm backend, all built-in widgets, the layout engine, and the `init`/`run` convenience helpers in one step.
+
+<Note>
+  **Minimum supported Rust version (MSRV): 1.88.0**
+
+  Ratatui 0.30 requires Rust 1.88.0 or later. Run `rustup update stable` to ensure you are on a recent toolchain.
+</Note>
+
+## Adding the Dependency
+
+```shell
+cargo add ratatui crossterm
+```
+
+This adds both crates to your `Cargo.toml`. Keeping `crossterm` as an explicit dependency makes the version visible in your manifest and lets you use its event types directly (e.g. `crossterm::event::read()`).
+
+The resulting `Cargo.toml` entry:
+
+```toml
+[dependencies]
+crossterm = "0.29"
+ratatui = "0.30"
+```
+
+If you want to pin to a specific Ratatui release:
+
+```toml
+[dependencies]
+crossterm = "0.29"
+ratatui = "0.30.2"
+```
+
+## Choosing a Backend
+
+Ratatui supports four terminal backends. Only one should be enabled at a time. The default is `crossterm`, which works on Linux, macOS, and Windows.
+
+<CodeGroup>
+
+```toml Crossterm (default)
+[dependencies]
+ratatui = "0.30"         # crossterm feature is on by default
+crossterm = "0.29"
+```
+
+```toml Termion (Unix only)
+[dependencies]
+ratatui = { version = "0.30", default-features = false, features = ["termion", "all-widgets", "macros", "underline-color"] }
+termion = "4"
+```
+
+```toml Termwiz
+[dependencies]
+ratatui = { version = "0.30", default-features = false, features = ["termwiz", "all-widgets", "macros", "underline-color"] }
+termwiz = "0.23"
+```
+
+```toml Termina
+[dependencies]
+ratatui = { version = "0.30", default-features = false, features = ["termina", "all-widgets", "macros", "underline-color"] }
+termina = "0.4"
+```
+
+</CodeGroup>
+
+<Warning>
+  `termion` is not supported on Windows. Use `crossterm`, `termwiz`, or `termina` for cross-platform applications.
+</Warning>
+
+## Feature Flags
+
+The `ratatui` crate exposes a comprehensive set of Cargo features. The defaults are chosen to work for most applications; override them with `default-features = false` and an explicit `features` list when you need a custom setup.
+
+### Default features
+
+The following features are enabled when you add `ratatui` without any overrides:
+
+```toml
+# This is what you get with just: ratatui = "0.30"
+default = ["all-widgets", "crossterm", "layout-cache", "macros", "underline-color"]
+```
+
+### Backend features
+
+| Feature | Description |
+|---|---|
+| `crossterm` | Enables `CrosstermBackend` via the `ratatui-crossterm` crate. **On by default.** Works on Linux, macOS, and Windows. |
+| `crossterm_0_28` | Selects the Crossterm 0.28.x backend implementation instead of the default 0.29.x. |
+| `crossterm_0_29` | Selects the Crossterm 0.29.x backend implementation. This is the default. |
+| `termion` | Enables `TermionBackend` via `ratatui-termion`. Unix/macOS only. |
+| `termina` | Enables `TerminaBackend` via `ratatui-termina`. |
+| `termwiz` | Enables `TermwizBackend` via `ratatui-termwiz`. |
+
+### Widget features
+
+| Feature | Description |
+|---|---|
+| `all-widgets` | Enables all optional widget modules. Currently includes `widget-calendar`. **On by default.** |
+| `widget-calendar` | Enables the [`calendar`](https://docs.rs/ratatui/latest/ratatui/widgets/calendar/index.html) widget module, which adds a dependency on the `time` crate. |
+
+### Rendering and style features
+
+| Feature | Description |
+|---|---|
+| `underline-color` | Enables backend support for setting the underline colour independently of the foreground colour. Supported by Crossterm, Termina, and Termwiz. Not available on Windows 7. **On by default.** |
+| `scrolling-regions` | Uses terminal scrolling regions to make `Terminal::insert_before` less prone to flickering. Opt-in because not all terminals support it reliably. |
+| `layout-cache` | Caches constraint solver results to speed up layout calculations across frames. **On by default.** |
+| `macros` | Enables the `ratatui-macros` crate and exposes it as `ratatui::macros`. Provides `constraint!`, `line!`, `span!`, `text!`, and layout helper macros. **On by default.** |
+
+### Serialization
+
+| Feature | Description |
+|---|---|
+| `serde` | Derives `Serialize` and `Deserialize` for `Style`, `Color`, and related types via the `serde` crate. Useful for saving and loading themes from files. |
+| `palette` | Enables conversions between colours in the [`palette`](https://crates.io/crates/palette) crate and Ratatui's `Color` type. |
+
+### Unstable features
+
+These features are experimental and their APIs may change in any release:
+
+| Feature | Description |
+|---|---|
+| `unstable` | Convenience alias that enables all unstable features listed below. |
+| `unstable-rendered-line-info` | Enables `Paragraph::line_count` and `Paragraph::line_width`, which expose post-render line metrics. See [issue #293](https://github.com/ratatui/ratatui/issues/293). |
+| `unstable-widget-ref` | Enables the `WidgetRef` and `StatefulWidgetRef` traits for rendering widgets behind shared references. |
+| `unstable-backend-writer` | Enables access to the underlying writer on `CrosstermBackend`, `TerminaBackend`, and `TermionBackend` for backends that support it. |
+
+### Example: custom feature set
+
+An app that needs serde support for themes but does not use the calendar widget:
+
+```toml
+[dependencies]
+ratatui = { version = "0.30", default-features = false, features = [
+    "crossterm",
+    "macros",
+    "underline-color",
+    "layout-cache",
+    "serde",
+] }
+crossterm = "0.29"
+```
+
+An app that targets only Unix and uses Termion:
+
+```toml
+[dependencies]
+ratatui = { version = "0.30", default-features = false, features = [
+    "termion",
+    "all-widgets",
+    "macros",
+    "underline-color",
+    "layout-cache",
+] }
+termion = "4"
+```
+
+## Scaffolding with `cargo-generate`
+
+The Ratatui project maintains an official [templates repository](https://github.com/ratatui/templates) that provides ready-to-use project scaffolds via [`cargo-generate`](https://crates.io/crates/cargo-generate).
+
+Install `cargo-generate` and run the template picker:
+
+```shell
+cargo install --locked cargo-generate
+cargo generate ratatui/templates
+```
+
+The generator presents an interactive menu. Selecting the **Hello World** template produces a project with the following structure and source:
+
+```rust
+use color_eyre::Result;
+use crossterm::event::{self, Event};
+use ratatui::{DefaultTerminal, Frame};
+
+fn main() -> Result<()> {
+    color_eyre::install()?;
+    let terminal = ratatui::init();
+    let result = run(terminal);
+    ratatui::restore();
+    result
+}
+
+fn run(mut terminal: DefaultTerminal) -> Result<()> {
+    loop {
+        terminal.draw(render)?;
+        if matches!(event::read()?, Event::Key(_)) {
+            break Ok(());
+        }
+    }
+}
+
+fn render(frame: &mut Frame) {
+    frame.render_widget("hello world", frame.area());
+}
+```
+
+<Tip>
+  The templates include `color-eyre` for richer panic and error messages. It is not required to use Ratatui, but it significantly improves the developer experience during development. Swap it for `anyhow` or plain `std::io::Error` if you prefer a lighter dependency tree.
+</Tip>
+
+## Verifying Your Installation
+
+After adding the dependency, confirm everything compiles:
+
+```shell
+cargo build
+```
+
+Then write the minimal application to verify the terminal backend is working:
+
+```rust
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    ratatui::run(|terminal| {
+        loop {
+            terminal.draw(|frame| frame.render_widget("Hello World!", frame.area()))?;
+            if crossterm::event::read()?.is_key_press() {
+                break Ok(());
+            }
+        }
+    })
+}
+```
+
+Run it with `cargo run`. You should see `Hello World!` fill the alternate screen. Press any key to exit.
+
+## What to Read Next
+
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    A step-by-step walkthrough of writing and understanding your first Ratatui app.
+  </Card>
+  <Card title="Backend comparison" icon="server" href="https://ratatui.rs/concepts/backends/">
+    Detailed guide to choosing and configuring a backend for your platform.
+  </Card>
+</CardGroup>

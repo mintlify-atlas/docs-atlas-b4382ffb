@@ -1,0 +1,325 @@
+---
+title: "Styling: Colors, Modifiers, and the Stylize Trait"
+sidebarTitle: "Styling"
+description: "How to style text and widgets in Ratatui using Style, Color, Modifier, the Stylize shorthand trait, and how styles compose across Text, Line, and Span."
+---
+
+Ratatui's styling system centers on three building blocks: `Color` for foreground and background colors, `Modifier` for text attributes such as bold and italic, and `Style` to bundle them together. The `Stylize` trait exposes a fluent shorthand API that lets you express styles inline without constructing a `Style` struct explicitly. These tools apply uniformly across text types, widgets, and the buffer cells that back every rendered frame.
+
+## The `Style` Struct
+
+`Style` represents the complete visual presentation of a terminal cell or text fragment:
+
+```rust
+use ratatui::style::{Color, Modifier, Style};
+
+// Explicit construction
+let style = Style::new()
+    .fg(Color::Green)
+    .bg(Color::Black)
+    .add_modifier(Modifier::BOLD | Modifier::ITALIC);
+
+// Shorthand via Stylize trait (preferred for inline use)
+let style = Style::new().green().on_black().bold().italic();
+```
+
+`Style` fields are all optional—`None` means "inherit from the parent or default". When a child style is applied over a parent, only the explicitly set fields override; unset fields fall through.
+
+### `patch_style` vs `set_style`
+
+| Method | Behavior |
+|--------|----------|
+| `patch_style(s)` | Merges `s` onto `self`; only the fields set in `s` override `self` |
+| `set_style(s)` | Replaces `self` with `s` entirely |
+
+```rust
+use ratatui::style::{Color, Modifier, Style};
+use ratatui::text::Span;
+
+let base = Span::styled("hello", Style::new().green().bold());
+
+// patch_style adds italic while keeping existing fg/modifier
+let patched = base.clone().patch_style(Style::new().italic());
+// Result: green + bold + italic
+
+// set_style replaces everything
+let replaced = base.set_style(Style::new().red());
+// Result: red, no bold
+```
+
+## `Color` Enum
+
+`Color` covers the 16 standard ANSI colors, a 256-color indexed palette, and 24-bit RGB:
+
+### Named ANSI Colors
+
+| Variant | Foreground code | Background code |
+|---------|:-:|:-:|
+| `Color::Black` | 30 | 40 |
+| `Color::Red` | 31 | 41 |
+| `Color::Green` | 32 | 42 |
+| `Color::Yellow` | 33 | 43 |
+| `Color::Blue` | 34 | 44 |
+| `Color::Magenta` | 35 | 45 |
+| `Color::Cyan` | 36 | 46 |
+| `Color::Gray` | 37 | 47 |
+| `Color::DarkGray` | 90 | 100 |
+| `Color::LightRed` | 91 | 101 |
+| `Color::LightGreen` | 92 | 102 |
+| `Color::LightYellow` | 93 | 103 |
+| `Color::LightBlue` | 94 | 104 |
+| `Color::LightMagenta` | 95 | 105 |
+| `Color::LightCyan` | 96 | 106 |
+| `Color::White` | 97 | 107 |
+| `Color::Reset` | *(resets to terminal default)* | |
+
+### 256-Color Indexed Palette
+
+```rust
+use ratatui::style::Color;
+
+let orange = Color::Indexed(214);
+let indigo = Color::Indexed(93);
+```
+
+The 256-color palette index maps to the standard xterm color table: indices 0–15 are the named ANSI colors, 16–231 form a 6×6×6 color cube, and 232–255 are a grayscale ramp.
+
+### True Color (24-bit RGB)
+
+```rust
+use ratatui::style::Color;
+
+let salmon = Color::Rgb(250, 128, 114);
+let teal   = Color::Rgb(0, 128, 128);
+
+// From a packed u32 in 0x00RRGGBB format
+let crimson = Color::from_u32(0x00DC143C);
+```
+
+<Warning>
+True color requires a terminal that supports 24-bit color. Terminals that do not support it may display incorrect or garbled output when `Color::Rgb` is used.
+</Warning>
+
+### Parsing Colors from Strings
+
+Colors can be parsed from strings, which is useful for theme files or configuration:
+
+```rust
+use std::str::FromStr;
+use ratatui::style::Color;
+
+assert_eq!(Color::from_str("red"), Ok(Color::Red));
+assert_eq!("light-blue".parse(), Ok(Color::LightBlue));
+assert_eq!("bright red".parse(), Ok(Color::LightRed));
+assert_eq!("#FF8C00".parse(), Ok(Color::Rgb(255, 140, 0)));
+assert_eq!("214".parse(), Ok(Color::Indexed(214)));
+```
+
+## `Modifier` Flags
+
+`Modifier` is a bitflag type for text presentation attributes. Flags can be combined with `|`:
+
+```rust
+use ratatui::style::Modifier;
+
+let bold_italic = Modifier::BOLD | Modifier::ITALIC;
+let all_blink   = Modifier::SLOW_BLINK | Modifier::RAPID_BLINK;
+```
+
+| Flag | Effect |
+|------|--------|
+| `Modifier::BOLD` | Increased intensity or bold font |
+| `Modifier::DIM` | Decreased intensity (faint) |
+| `Modifier::ITALIC` | Italic font |
+| `Modifier::UNDERLINED` | Underline |
+| `Modifier::SLOW_BLINK` | Slow blink (< 150 Hz) |
+| `Modifier::RAPID_BLINK` | Rapid blink (≥ 150 Hz) |
+| `Modifier::REVERSED` | Swap foreground and background colors |
+| `Modifier::HIDDEN` | Invisible text (foreground = background) |
+| `Modifier::CROSSED_OUT` | Strikethrough |
+
+Terminal support for these flags varies. Bold, italic, underline, and reversed are the most universally supported.
+
+## The `Stylize` Trait
+
+`Stylize` provides short-hand methods directly on `Style`, `Span`, `Line`, `Text`, `String`, `&str`, and most built-in widgets. Each named color becomes two methods: one for the foreground (`red()`, `blue()`, …) and one for the background (`on_red()`, `on_blue()`, …).
+
+```rust
+use ratatui::style::Stylize;
+
+// On a string literal
+let styled_str = "Hello".red().on_white().bold();
+
+// On a String
+let styled_string = String::from("World").green().italic();
+
+// On a Style
+let style = Style::new().yellow().on_black().underlined();
+
+// On a widget
+use ratatui::widgets::Paragraph;
+let p = Paragraph::new("Warning!").red().bold();
+```
+
+The full color shorthand list:
+
+```rust
+// Foreground colors
+.black()  .red()    .green()  .yellow()  .blue()
+.magenta() .cyan()  .gray()   .dark_gray()
+.light_red()  .light_green()  .light_yellow()
+.light_blue() .light_magenta() .light_cyan() .white()
+
+// Background colors (prefix on_)
+.on_black()  .on_red()    .on_green()  .on_yellow()  .on_blue()
+.on_magenta() .on_cyan()  .on_gray()   .on_dark_gray()
+.on_light_red()  .on_light_green()  .on_light_yellow()
+.on_light_blue() .on_light_magenta() .on_light_cyan() .on_white()
+
+// Text attributes
+.bold()  .dim()  .italic()  .underlined()
+.slow_blink()  .rapid_blink()  .reversed()  .hidden()  .crossed_out()
+.not_bold()  .not_italic()  ...  // modifiers can be unset too
+```
+
+For arbitrary colors use `.fg(Color::Rgb(…))` and `.bg(Color::Indexed(…))`.
+
+## Text, Line, and Span
+
+Text rendering in Ratatui is organized as a three-level hierarchy:
+
+```
+Text
+ └── Vec<Line>
+       └── Vec<Span>
+             └── content: Cow<str>  +  style: Style
+```
+
+- **`Span`** — the smallest styled unit: a contiguous string fragment with a single `Style`.
+- **`Line`** — an ordered list of `Span`s. Also has its own `Style` (applied to the whole line) and an `Alignment`.
+- **`Text`** — an ordered list of `Line`s. Also has its own `Style` (applied to all lines).
+
+Styles compose outward: a `Text` style is applied first, then each `Line` style, then each `Span` style. Inner styles override outer styles for the fields they set.
+
+### Creating Spans
+
+```rust
+use ratatui::style::{Color, Style, Stylize};
+use ratatui::text::Span;
+
+// Default style (no formatting)
+let plain = Span::raw("plain text");
+
+// Explicit style
+let styled = Span::styled(
+    "styled text",
+    Style::new().fg(Color::Green).bg(Color::White).add_modifier(ratatui::style::Modifier::BOLD),
+);
+
+// Using Stylize shorthand
+let shorthand = "styled text".green().on_white().bold();
+```
+
+### Creating Lines
+
+```rust
+use ratatui::style::Stylize;
+use ratatui::text::{Line, Span};
+
+// From a string
+let line = Line::from("Hello, world!");
+
+// From mixed spans
+let line = Line::from(vec![
+    Span::raw("Hello "),
+    Span::styled("World", Style::new().bold().green()),
+    "!".red().on_light_yellow().italic().into(),
+]);
+
+// With alignment
+let centered = Line::from("Centered text").centered();
+let right     = Line::from("Right text").right_aligned();
+```
+
+### Creating Text
+
+```rust
+use ratatui::style::Stylize;
+use ratatui::text::{Line, Text};
+
+let text = Text::from("A single line");
+
+let text = Text::from(vec![
+    Line::from("First line".bold()),
+    Line::from("Second line".italic()),
+    Line::from("Third line"),
+]);
+
+// Apply a base style to all lines
+let text = Text::from("Hello").red();
+```
+
+### Full Styling Example from the Ratatui Docs
+
+```rust
+use ratatui::Frame;
+use ratatui::layout::{Constraint, Layout};
+use ratatui::style::{Color, Modifier, Style, Stylize};
+use ratatui::text::{Line, Span};
+use ratatui::widgets::{Block, Paragraph};
+
+fn draw(frame: &mut Frame) {
+    let areas = Layout::vertical([Constraint::Length(1); 4]).split(frame.area());
+
+    // Explicit Style construction mixed with Stylize shorthand
+    let line = Line::from(vec![
+        Span::raw("Hello "),
+        Span::styled(
+            "World",
+            Style::new()
+                .fg(Color::Green)
+                .bg(Color::White)
+                .add_modifier(Modifier::BOLD),
+        ),
+        "!".red().on_light_yellow().italic(),
+    ]);
+    frame.render_widget(line, areas[0]);
+
+    // Stylize shorthand on the string itself
+    let paragraph = Paragraph::new("Hello World!".red().on_white().bold());
+    frame.render_widget(paragraph, areas[1]);
+
+    // Style applied to the whole widget
+    let paragraph = Paragraph::new("Hello World!").style(Style::new().red().on_white());
+    frame.render_widget(paragraph, areas[2]);
+
+    // Shortest form — Stylize methods directly on Paragraph
+    let paragraph = Paragraph::new("Hello World!").blue().on_yellow();
+    frame.render_widget(paragraph, areas[3]);
+}
+```
+
+## Serde Support for Themes
+
+Enable the `serde` feature flag to serialize and deserialize `Style`, `Color`, and `Modifier`. Colors serialize as human-readable strings (`"red"`, `"#FF0000"`, `"214"`), making them easy to store in TOML or JSON theme files:
+
+```toml
+# Cargo.toml
+[dependencies]
+ratatui = { version = "...", features = ["serde"] }
+```
+
+```rust
+use ratatui::style::Color;
+
+#[derive(serde::Deserialize)]
+struct Theme {
+    primary: Color,
+    accent: Color,
+}
+
+// Deserialize from JSON
+let theme: Theme = serde_json::from_str(r#"
+    { "primary": "blue", "accent": "#FF8C00" }
+"#)?;
+```

@@ -1,0 +1,212 @@
+---
+title: "Ratatui Feature Flags Reference"
+sidebarTitle: "Feature Flags"
+description: "All Cargo feature flags for the ratatui crate — default features, backend selection, optional widgets, serialization, no_std, unstable APIs, and more."
+---
+
+Ratatui uses Cargo feature flags to keep the dependency graph lean and compile times short. By default, the crate enables the crossterm backend, all built-in widgets, the layout cache, the macros module, and underline-color support. Anything you don't need can be disabled by setting `default-features = false` and opting in to only what you use.
+
+## Default Features
+
+The following features are active when you add `ratatui` without specifying `default-features = false`:
+
+```toml
+[dependencies]
+ratatui = "0.30.2"
+# equivalent to:
+# ratatui = { version = "0.30.2", features = ["crossterm", "all-widgets", "layout-cache", "macros", "underline-color"] }
+```
+
+| Feature | Default | Description |
+|---|:---:|---|
+| `crossterm` | ✅ | Enables the `CrosstermBackend` and adds a dependency on `crossterm` 0.29 |
+| `all-widgets` | ✅ | Enables all optional widgets (currently enables `widget-calendar`) |
+| `layout-cache` | ✅ | Enables a layout result cache to avoid recomputing layouts on every frame |
+| `macros` | ✅ | Enables the `macros` module (`span!`, `line!`, `text!`, `constraints!`, etc.) |
+| `underline-color` | ✅ | Enables setting underline color (supported by crossterm, termina, and termwiz) |
+
+<Warning>
+Disabling `default-features` implicitly disables `std`, `layout-cache`, and `underline-color`. This can negatively impact performance and suppress error messages. Re-enable at least `std` and `layout-cache` unless you have a specific reason not to:
+
+```toml
+ratatui = { version = "0.30.2", default-features = false, features = ["crossterm", "layout-cache"] }
+```
+</Warning>
+
+---
+
+## Backend Features
+
+Only one backend feature should be enabled at a time. Enabling multiple backends is harmless but adds unnecessary compile time.
+
+| Feature | Default | Description |
+|---|:---:|---|
+| `crossterm` | ✅ | Cross-platform backend via `crossterm` 0.29. Supports Linux, macOS, and Windows. |
+| `crossterm_0_28` | ❌ | Selects the crossterm 0.28.x backend implementation (also enables `crossterm`). |
+| `crossterm_0_29` | ❌ | Selects the crossterm 0.29.x backend implementation — the default when `crossterm` is enabled. |
+| `termion` | ❌ | Unix-only backend via `termion` 4. Not available on Windows. |
+| `termwiz` | ❌ | Advanced backend via `termwiz` 0.23 (part of the WezTerm project). |
+| `termina` | ❌ | Backend via `termina` 0.4, supporting typed escape sequences and Termina events. |
+
+### Switching backends
+
+<CodeGroup>
+```toml crossterm (default)
+[dependencies]
+ratatui = "0.30.2"
+```
+
+```toml termion (Unix only)
+[dependencies]
+ratatui = { version = "0.30.2", default-features = false, features = ["termion", "all-widgets", "macros"] }
+```
+
+```toml termwiz
+[dependencies]
+ratatui = { version = "0.30.2", default-features = false, features = ["termwiz", "all-widgets", "macros"] }
+```
+
+```toml termina
+[dependencies]
+ratatui = { version = "0.30.2", default-features = false, features = ["termina", "all-widgets", "macros"] }
+```
+</CodeGroup>
+
+---
+
+## Optional Features
+
+### `std`
+
+Enables standard-library support. This feature is automatically activated by all backend features (`crossterm`, `termion`, `termwiz`, `termina`). Disable it only when targeting `no_std` environments.
+
+```toml
+# Minimal no_std build — use ratatui-core directly for most no_std cases
+ratatui-core = { version = "0.1.2", default-features = false, features = ["layout-cache"] }
+```
+
+### `serde`
+
+Enables serialization and deserialization of style and color types via the [`serde`](https://serde.rs) crate. Useful for saving and loading themes from configuration files.
+
+```toml
+ratatui = { version = "0.30.2", features = ["serde"] }
+```
+
+Activates `serde` support in `ratatui-core`, `ratatui-widgets`, and all enabled backend crates.
+
+### `layout-cache`
+
+Caches layout computation results to avoid recalculating unchanged layouts on every frame. This is enabled by default and has a significant positive impact on performance for complex layouts.
+
+```toml
+# Explicitly re-enable after setting default-features = false
+ratatui = { version = "0.30.2", default-features = false, features = ["layout-cache", "crossterm"] }
+```
+
+<Info>
+In `no_std` environments, the `layout-cache` feature uses `critical-section` for atomic access instead of the standard `std::sync` primitives. The same feature flag works on both `std` and `no_std` targets.
+</Info>
+
+### `palette`
+
+Enables conversions from colors in the [`palette`](https://crates.io/crates/palette) crate to `ratatui::style::Color`. Previously `Color::from_hsl` was a built-in method; since 0.29.0 it lives behind this feature and now accepts a `palette::Hsl` value.
+
+```toml
+ratatui = { version = "0.30.2", features = ["palette"] }
+```
+
+```rust
+use palette::Hsl;
+use ratatui::style::Color;
+
+let color = Color::from_hsl(Hsl::new(120.0, 1.0, 0.5));
+```
+
+### `portable-atomic`
+
+Enables `portable-atomic` integration for compile targets that do not natively support atomic types (e.g. some embedded RISC-V targets). Propagates the flag to `ratatui-core` and `ratatui-widgets`.
+
+```toml
+ratatui = { version = "0.30.2", features = ["portable-atomic"] }
+```
+
+### `scrolling-regions`
+
+Uses terminal scrolling-region escape sequences when available to reduce flickering during `Terminal::insert_before` operations. Propagates to all enabled backend crates.
+
+```toml
+ratatui = { version = "0.30.2", features = ["scrolling-regions"] }
+```
+
+### `macros`
+
+Enables the `ratatui::macros` module, which provides the `span!`, `line!`, `text!`, `constraints!`, `constraint!`, `vertical!`, `horizontal!`, and `row!` macros. Enabled by default.
+
+### `all-widgets`
+
+Enables all optional widget modules. Currently this is equivalent to enabling `widget-calendar`.
+
+### `widget-calendar`
+
+Enables the `ratatui::widgets::calendar` module, which adds a `Monthly` calendar widget. Requires the `time` crate.
+
+```toml
+ratatui = { version = "0.30.2", features = ["widget-calendar"] }
+```
+
+### `underline-color`
+
+Enables backend support for setting the underline color independently of the foreground and background colors. Supported by the crossterm, termina, and termwiz backends. Not supported on Windows 7.
+
+---
+
+## Unstable Features
+
+Unstable features may change their API or be removed in future releases without a major version bump. They are gated behind feature flags so that opting in is explicit.
+
+| Feature | Description |
+|---|---|
+| `unstable` | Meta-feature that enables all unstable features at once. |
+| `unstable-widget-ref` | Enables the `WidgetRef` and `StatefulWidgetRef` traits, which allow rendering widgets from shared references. |
+| `unstable-rendered-line-info` | Enables `Paragraph::line_count` and `Paragraph::line_width` — experimental methods for querying rendered layout. See [Issue #293](https://github.com/ratatui/ratatui/issues/293). |
+| `unstable-backend-writer` | Enables access to the inner writer of backend implementations (e.g. to flush raw escape sequences). Supported by crossterm, termina, and termion backends. |
+
+```toml
+# Opt into a specific unstable feature
+ratatui = { version = "0.30.2", features = ["unstable-widget-ref"] }
+
+# Opt into all unstable features (not recommended for production)
+ratatui = { version = "0.30.2", features = ["unstable"] }
+```
+
+<Warning>
+Features prefixed with `unstable-` may have breaking API changes in minor releases. Pin to an exact version or a narrow range if you depend on them.
+</Warning>
+
+---
+
+## Feature Flag Quick Reference
+
+| Feature | Default | Category |
+|---|:---:|---|
+| `crossterm` | ✅ | Backend |
+| `crossterm_0_28` | ❌ | Backend |
+| `crossterm_0_29` | ❌ | Backend |
+| `termion` | ❌ | Backend |
+| `termwiz` | ❌ | Backend |
+| `termina` | ❌ | Backend |
+| `std` | ✅ (via backend) | Core |
+| `layout-cache` | ✅ | Core |
+| `macros` | ✅ | Utilities |
+| `all-widgets` | ✅ | Widgets |
+| `widget-calendar` | ❌ | Widgets |
+| `underline-color` | ✅ | Rendering |
+| `serde` | ❌ | Serialization |
+| `palette` | ❌ | Color |
+| `portable-atomic` | ❌ | Compatibility |
+| `scrolling-regions` | ❌ | Rendering |
+| `unstable` | ❌ | Unstable |
+| `unstable-widget-ref` | ❌ | Unstable |
+| `unstable-rendered-line-info` | ❌ | Unstable |
+| `unstable-backend-writer` | ❌ | Unstable |

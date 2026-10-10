@@ -1,0 +1,391 @@
+---
+title: "Migrating to Ratatui: Version-by-Version Guide"
+sidebarTitle: "Migration"
+description: "Step-by-step migration guides: from tui-rs to ratatui, from the monolithic 0.29 crate to the 0.30 modular workspace, and key API changes across recent releases."
+---
+
+This page collects the most impactful migration paths for Ratatui projects. Whether you are upgrading from the old `tui-rs` crate, moving from a pre-0.30 monolithic build to the new modular workspace, or updating after any recent minor release, the sections below provide concrete before/after diffs and the context to understand what changed.
+
+For the complete list of breaking changes across every version, see [BREAKING-CHANGES.md](https://github.com/ratatui/ratatui/blob/main/BREAKING-CHANGES.md).
+
+---
+
+## Migrating from `tui-rs` to `ratatui`
+
+`ratatui` is a community-maintained fork of the unmaintained `tui-rs` crate. The first release was **v0.20.0**. The public API is largely compatible, with the namespace changed from `tui` to `ratatui`.
+
+<Steps>
+  <Step title="Replace the dependency">
+    Remove `tui` from `Cargo.toml` and add `ratatui`:
+
+    ```toml
+    [dependencies]
+    # Remove:
+    # tui = "0.19"
+
+    # Add:
+    ratatui = "0.30.2"
+    ```
+  </Step>
+
+  <Step title="Update all use statements">
+    Do a project-wide find-and-replace:
+
+    ```diff
+    - use tui::
+    + use ratatui::
+    ```
+  </Step>
+
+  <Step title="Replace Spans with Line">
+    The `Spans` type was removed in v0.24.0. Use `Line` instead, and replace `Buffer::set_spans` with `Buffer::set_line`:
+
+    ```diff
+    - use tui::text::Spans;
+    + use ratatui::text::Line;
+
+    - let spans = Spans::from(vec!["hello".into(), " world".into()]);
+    + let line = Line::from(vec!["hello", " world"]);
+
+    - buffer.set_spans(0, 0, &spans, 10);
+    + buffer.set_line(0, 0, &line, 10);
+    ```
+  </Step>
+
+  <Step title="Update the Frame signature">
+    Ratatui v0.24.0 removed the `Backend` generic parameter from `Frame`:
+
+    ```diff
+    - fn ui<B: Backend>(frame: &mut Frame<B>) { ... }
+    + fn ui(frame: &mut Frame) { ... }
+    ```
+  </Step>
+
+  <Step title="Use ratatui::init() for setup (v0.28.1+)">
+    Ratatui 0.28.1 introduced convenience functions that replace the verbose boilerplate for setting up and tearing down the terminal. Using `init()` and `restore()` is now the recommended way to start and stop an application:
+
+    ```rust
+    fn main() -> std::io::Result<()> {
+        let mut terminal = ratatui::init();
+        let result = run(&mut terminal);
+        ratatui::restore();
+        result
+    }
+    ```
+
+    The old manual setup still works if you need custom configuration:
+
+    ```rust
+    use std::io;
+    use crossterm::{
+        execute,
+        terminal::{enable_raw_mode, EnterAlternateScreen},
+    };
+    use ratatui::{Terminal, backend::CrosstermBackend};
+
+    let mut stdout = io::stdout();
+    enable_raw_mode()?;
+    execute!(stdout, EnterAlternateScreen)?;
+    let backend = CrosstermBackend::new(stdout);
+    let mut terminal = Terminal::new(backend)?;
+    ```
+  </Step>
+</Steps>
+
+---
+
+## Migrating from 0.29.x to 0.30.0 (Modular Workspace)
+
+Version 0.30.0 reorganized Ratatui into a Cargo workspace of specialized crates. **All existing code using `ratatui` continues to compile unchanged** — the main crate re-exports the full public API. Most projects require no code changes at all.
+
+### For application developers
+
+Your `Cargo.toml` and all `use ratatui::...` statements continue to work:
+
+```rust
+// No changes needed — everything is still re-exported
+use ratatui::{
+    widgets::{Block, Paragraph},
+    layout::{Layout, Constraint},
+    Terminal,
+};
+```
+
+However, two behavioral changes affect projects that disable default features:
+
+<Steps>
+  <Step title="Re-enable layout-cache if you use default-features = false">
+    The `layout-cache` feature is now opt-in in `ratatui-core`. If you disable default features, explicitly re-enable it to avoid a significant performance regression:
+
+    ```diff
+    - ratatui = { version = "0.29.0", default-features = false }
+    + ratatui = { version = "0.30.0", default-features = false, features = ["layout-cache"] }
+    ```
+  </Step>
+
+  <Step title="Re-enable std if you need error messages in Terminal::drop">
+    Disabling default features also disables `std`. Without `std`, the error message printed when `show_cursor()` fails during `Terminal` drop is suppressed. Re-enable `std` unless you are targeting a `no_std` environment:
+
+    ```diff
+    - ratatui = { version = "0.29.0", default-features = false, features = ["crossterm"] }
+    + ratatui = { version = "0.30.0", default-features = false, features = ["crossterm", "std"] }
+    ```
+  </Step>
+</Steps>
+
+### For widget library authors
+
+If your crate provides custom widgets, consider migrating your dependency from `ratatui` to `ratatui-core`. This decouples your library from the `ratatui` release cadence and minimizes transitive dependencies for your users.
+
+```diff
+# Cargo.toml
+[dependencies]
+- ratatui = "0.29"
++ ratatui-core = "0.1"
+```
+
+```diff
+# src/lib.rs
+- use ratatui::{
+-     widgets::{Widget, StatefulWidget},
+-     buffer::Buffer,
+-     layout::Rect,
+- };
++ use ratatui_core::{
++     widgets::{Widget, StatefulWidget},
++     buffer::Buffer,
++     layout::Rect,
++ };
+```
+
+<Info>
+`ratatui-core` is `no_std` compatible, so migrating to it also makes your widget library embeddable in constrained environments.
+</Info>
+
+### Breaking API changes in v0.30.0
+
+<Accordion title="Backend trait: associated Error type and clear_region">
+  Custom `Backend` implementations must now define an associated `Error` type and implement `clear_region`:
+
+  ```diff
+  impl Backend for MyBackend {
+  +   type Error = std::io::Error;
+  +
+  +   fn clear_region(&mut self, region: ClearType) -> Result<(), Self::Error> {
+  +       // ...
+  +   }
+      // other methods...
+  }
+  ```
+
+  If you have generic code that accepts any backend, update the return type:
+
+  ```diff
+  - fn run<B: Backend>(mut terminal: Terminal<B>) -> io::Result<()> {
+  + fn run<B: Backend>(mut terminal: Terminal<B>) -> Result<(), B::Error> {
+  ```
+
+  Or, if you always use the crossterm backend, be explicit:
+
+  ```diff
+  - fn run<B: Backend>(mut terminal: Terminal<B>) -> io::Result<()> {
+  + fn run(mut terminal: DefaultTerminal) -> io::Result<()> {
+  ```
+</Accordion>
+
+<Accordion title="layout::Alignment renamed to layout::HorizontalAlignment">
+  A type alias keeps existing code compiling, but glob imports of enum variants will break:
+
+  ```diff
+  - use ratatui::layout::Alignment;
+  + use ratatui::layout::HorizontalAlignment;
+
+  - use Alignment::*;
+  + use HorizontalAlignment::*;
+  ```
+</Accordion>
+
+<Accordion title="block::Title removed">
+  ```diff
+  - use ratatui::widgets::{Block, block::{Title, Position}};
+  + use ratatui::widgets::{Block, TitlePosition};
+
+  let block = Block::default()
+  -   .title(Title::from("Hello"))
+  -   .title(Title::from("World").position(Position::Bottom).alignment(Alignment::Center))
+  +   .title(Line::from("Hello"))
+  +   .title_bottom(Line::from("World").centered());
+  ```
+
+  `BlockExt` is now exported from `widgets::BlockExt` instead of `widgets::block::BlockExt`:
+
+  ```diff
+  - use ratatui::widgets::block::BlockExt;
+  + use ratatui::widgets::BlockExt;
+  ```
+</Accordion>
+
+<Accordion title="Flex::SpaceAround semantics changed">
+  The old `SpaceAround` (uniform gaps) is now `SpaceEvenly`:
+
+  ```diff
+  - Layout::horizontal([Length(1), Length(2)]).flex(Flex::SpaceAround)
+  + Layout::horizontal([Length(1), Length(2)]).flex(Flex::SpaceEvenly)
+  ```
+</Accordion>
+
+<Accordion title="Marker is now non-exhaustive">
+  Add a wildcard arm to exhaustive matches:
+
+  ```diff
+    match marker {
+        Marker::Dot => {}
+        Marker::Braille => {}
+  +     _ => {}
+    }
+  ```
+</Accordion>
+
+<Accordion title="TestBackend now uses Infallible">
+  Test code that pattern-matched on `std::io::Error` from `TestBackend` must be updated to handle `Infallible`:
+
+  ```diff
+  - let result: io::Result<CompletedFrame> = terminal.draw(|f| { ... });
+  + let result: Result<CompletedFrame, core::convert::Infallible> = terminal.draw(|f| { ... });
+  ```
+</Accordion>
+
+---
+
+## Migrating from 0.28.x to 0.29.0
+
+<Accordion title="Sparkline::data now takes IntoIterator<Item = SparklineBar>">
+  ```diff
+  let value = 1u8;
+  - Sparkline::default().data(&[value.into()])
+  + Sparkline::default().data(&[u64::from(value)])
+  ```
+  The method is no longer `const`. Per-bar styling and absent-value support (`None` vs `0`) are now available via `SparklineBar`.
+</Accordion>
+
+<Accordion title="Table::highlight_style renamed to row_highlight_style">
+  ```diff
+  - table.highlight_style(Style::new().reversed())
+  + table.row_highlight_style(Style::new().reversed())
+  ```
+  The old name still compiles with a deprecation warning.
+</Accordion>
+
+<Accordion title="Tabs::select now accepts Into<Option<usize>>">
+  ```diff
+  let selected = 1u8;
+  - Tabs::new(["A", "B"]).select(selected.into())
+  + Tabs::new(["A", "B"]).select(selected as usize)
+  ```
+</Accordion>
+
+<Accordion title="Color::from_hsl moved behind palette feature">
+  ```diff
+  - Color::from_hsl(360.0, 100.0, 100.0)
+  + Color::from_hsl(Hsl::new(360.0, 100.0, 100.0))
+  ```
+
+  Add the `palette` feature to your `Cargo.toml`:
+
+  ```toml
+  ratatui = { version = "0.29", features = ["palette"] }
+  ```
+</Accordion>
+
+---
+
+## Migrating from 0.27.x to 0.28.0
+
+<Accordion title="Backend trait: get/set_cursor_position">
+  If you implement `Backend`, add `get_cursor_position` and `set_cursor_position`. The old `get_cursor` and `set_cursor` are deprecated with default implementations.
+</Accordion>
+
+<Accordion title="Backend::size now returns Size instead of Rect">
+  ```diff
+  - let rect: Rect = backend.size()?;
+  + let size: Size = backend.size()?;
+  ```
+</Accordion>
+
+<Accordion title="ratatui::terminal module is now private">
+  ```diff
+  - use ratatui::terminal::{CompletedFrame, Frame, Terminal, TerminalOptions, ViewPort};
+  + use ratatui::{CompletedFrame, Frame, Terminal, TerminalOptions, ViewPort};
+  ```
+</Accordion>
+
+<Accordion title="Frame::size deprecated in favour of Frame::area">
+  ```diff
+  - let area = frame.size();
+  + let area = frame.area();
+  ```
+</Accordion>
+
+---
+
+## Migrating from 0.26.x to 0.27.0
+
+<Accordion title="Rect::inner now takes Margin by value (not reference)">
+  ```diff
+  - let area = area.inner(&Margin { vertical: 0, horizontal: 2 });
+  + let area = area.inner(Margin { vertical: 0, horizontal: 2 });
+  ```
+</Accordion>
+
+<Accordion title="Buffer::filled now takes Cell by value (not reference)">
+  ```diff
+  - Buffer::filled(area, &Cell::new("X"));
+  + Buffer::filled(area, Cell::new("X"));
+  ```
+</Accordion>
+
+<Accordion title="List::start_corner removed — use List::direction">
+  `List::start_corner` was deprecated in v0.25 and is now removed.
+
+  ```diff
+  - list.start_corner(Corner::BottomLeft)
+  + list.direction(ListDirection::BottomToTop)
+  ```
+</Accordion>
+
+---
+
+## Migrating from 0.25.x to 0.26.0
+
+<Accordion title="Layout default changed from stretch to Flex::Start">
+  The previous default stretched constraints to fill available space. The new default, `Flex::Start`, aligns areas to the start of the available space. To preserve old behavior:
+
+  ```diff
+  - Layout::horizontal([Length(1), Length(2)]).split(area)
+  + Layout::horizontal([Length(1), Length(2)]).flex(Flex::Legacy).split(area)
+  ```
+</Accordion>
+
+<Accordion title="patch_style and reset_style are now fluent (consume Self)">
+  ```diff
+  - let mut line = Line::from("foobar");
+  - line.patch_style(style);
+  + let line = Line::from("foobar").patch_style(style);
+  ```
+</Accordion>
+
+---
+
+## Quick Reference: API Changes by Version
+
+| Version | Change | Migration |
+|---|---|---|
+| 0.31.0 | `Backend` gains optional `save/restore_cursor_position` | No action needed; methods have defaults |
+| 0.30.1 | MSRV → 1.88.0; `AsRef` impls on widgets | Add type annotations if inference breaks |
+| 0.30.0 | Modular workspace; `Backend::Error`; `HorizontalAlignment`; `block::Title` removed | See sections above |
+| 0.29.0 | `Sparkline::data`; `row_highlight_style`; `Tabs::select`; `palette` feature | See sections above |
+| 0.28.1 | `ratatui::init()` and `ratatui::restore()` added | Recommended for all new projects |
+| 0.28.0 | `Backend::size → Size`; cursor methods; `Frame::area`; Crossterm 0.28 | See sections above |
+| 0.27.0 | `Flex` layout; `Rect::inner` by value; `List::direction` | See sections above |
+| 0.24.0 | `Frame<B>` → `Frame`; `Spans` → `Line` | See tui-rs migration above |
+| 0.20.0 | First Ratatui release (tui-rs fork) | Replace `tui` crate |

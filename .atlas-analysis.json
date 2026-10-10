@@ -1,0 +1,103 @@
+{
+  "projectType": "sdk-library",
+  "projectName": "Ratatui",
+  "projectDescription": "A Rust crate for building rich, interactive terminal user interfaces (TUIs) with a flexible widget system, layout engine, and multiple backend support.",
+  "theme": "luma",
+  "primaryColor": "#82aaff",
+  "lightColor": "#949494",
+  "darkColor": "#464646",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "quickstart",
+              "installation"
+            ]
+          },
+          {
+            "group": "Core Concepts",
+            "pages": [
+              "concepts/terminal",
+              "concepts/rendering",
+              "concepts/layout",
+              "concepts/widgets",
+              "concepts/styling",
+              "concepts/event-handling"
+            ]
+          },
+          {
+            "group": "Widgets",
+            "pages": [
+              "widgets/overview",
+              "widgets/block",
+              "widgets/paragraph",
+              "widgets/list",
+              "widgets/table",
+              "widgets/chart",
+              "widgets/other-widgets"
+            ]
+          },
+          {
+            "group": "Guides",
+            "pages": [
+              "guides/backends",
+              "guides/custom-widgets",
+              "guides/async-applications",
+              "guides/testing"
+            ]
+          },
+          {
+            "group": "Reference",
+            "pages": [
+              "reference/crate-structure",
+              "reference/macros",
+              "reference/feature-flags",
+              "reference/changelog",
+              "reference/migration"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Immediate-mode rendering with efficient diff-based terminal updates",
+    "Flexible constraint-based layout system (Length, Percentage, Ratio, Fill, Min, Max)",
+    "Rich built-in widget library: Block, Paragraph, List, Table, Chart, Canvas, Gauge, Sparkline, Tabs, Scrollbar, Calendar",
+    "Multiple backend support: Crossterm (default, cross-platform), Termion (Unix), Termwiz, Termina",
+    "Powerful text styling with colors, modifiers (Bold, Italic, Underline, etc.) and the Stylize trait",
+    "Modular workspace architecture (ratatui-core, ratatui-widgets, backend crates)",
+    "Declarative macros via ratatui-macros for layouts, spans, lines, text, and tables",
+    "no_std compatible core crate for embedded and minimalist environments",
+    "Serde support for serializing/deserializing style and color types",
+    "StatefulWidget trait for widgets that maintain state across frames"
+  ],
+  "publicApiSurface": [
+    "ratatui::run()",
+    "ratatui::init() / ratatui::restore()",
+    "ratatui::run_with_options()",
+    "ratatui::init_with_options()",
+    "Terminal<B: Backend>",
+    "Terminal::draw()",
+    "Frame::render_widget()",
+    "Frame::render_stateful_widget()",
+    "Widget trait",
+    "StatefulWidget trait",
+    "Layout::vertical() / Layout::horizontal()",
+    "Layout::areas()",
+    "Constraint::{Length, Percentage, Ratio, Fill, Min, Max}",
+    "Block, Paragraph, List, Table, Chart, Canvas, BarChart, Gauge, LineGauge, Sparkline, Tabs, Scrollbar, Calendar",
+    "Style, Color, Modifier",
+    "Stylize trait",
+    "Text, Line, Span",
+    "Buffer",
+    "Rect, Position, Size",
+    "CrosstermBackend, TermionBackend, TermwizBackend, TerminaBackend",
+    "macros: span!, line!, text!, constraints!, vertical!, horizontal!, row!"
+  ]
+}

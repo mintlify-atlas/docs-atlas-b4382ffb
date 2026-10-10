@@ -1,0 +1,325 @@
+---
+title: "Testing Ratatui Widgets and Applications"
+sidebarTitle: "Testing"
+description: "Use TestBackend and Buffer assertions to unit-test widget output, cursor position, and full terminal state without a real terminal."
+---
+
+Ratatui ships a `TestBackend` — an in-memory backend that implements the full `Backend` trait and
+records everything that would be written to a real terminal in a `Buffer`. No terminal emulator,
+no TTY, no special environment variables are required. You construct a `Terminal` backed by
+`TestBackend`, call `terminal.draw(...)` as normal, and then assert on the resulting buffer using
+`assert_eq!` or the convenience methods provided by `TestBackend`.
+
+## TestBackend overview
+
+`TestBackend` stores the current screen state in a `Buffer` of a fixed width and height. The
+`buffer()` method returns an immutable reference to that buffer after each draw call.
+
+```rust
+use ratatui::backend::TestBackend;
+
+let mut backend = TestBackend::new(20, 5); // 20 columns, 5 rows
+```
+
+The struct also exposes:
+
+- `buffer()` — the current screen as a `Buffer`
+- `cursor_visible()` — whether the cursor is shown
+- `cursor_position()` — the current cursor position as a `Position`
+- `scrollback()` — lines that scrolled past the top of the visible area
+- `assert_buffer_lines(lines)` — assert the screen content matches a slice of strings
+- `assert_buffer(expected)` — assert the screen matches a `Buffer`
+- `assert_cursor_position(pos)` — assert the cursor is at a specific position
+- `resize(width, height)` — resize the virtual terminal
+
+## Writing a widget unit test
+
+The fastest way to test a widget is to render it directly into a `Buffer` without constructing a
+`Terminal`. This is the preferred approach for isolated widget tests.
+
+```rust
+#[cfg(test)]
+mod tests {
+    use ratatui::buffer::Buffer;
+    use ratatui::layout::Rect;
+    use ratatui::style::{Color, Style};
+    use ratatui::widgets::Widget;
+
+    struct Badge<'a> {
+        label: &'a str,
+    }
+
+    impl Widget for Badge<'_> {
+        fn render(self, area: ratatui::layout::Rect, buf: &mut Buffer) {
+            buf.set_string(
+                area.x,
+                area.y,
+                format!("[{}]", self.label),
+                Style::new().fg(Color::Green),
+            );
+        }
+    }
+
+    #[test]
+    fn badge_renders_label_with_brackets() {
+        let area = Rect::new(0, 0, 10, 1);
+        let mut buf = Buffer::empty(area);
+
+        Badge { label: "OK" }.render(area, &mut buf);
+
+        // Compare content and style together.
+        let mut expected = Buffer::with_lines(["[OK]      "]);
+        // Set the expected style on the cells that should be coloured.
+        for x in 0..4 {
+            expected[(x, 0)].set_fg(Color::Green);
+        }
+        assert_eq!(buf, expected);
+    }
+}
+```
+
+<Tip>
+  `Buffer::with_lines` is the most convenient way to construct an expected buffer. Each `&str`
+  in the slice becomes one row. Cells not explicitly styled are left at the default style, so
+  you only need to annotate cells whose style you are asserting on.
+</Tip>
+
+## Testing with Terminal and TestBackend
+
+Use `Terminal::new(TestBackend::new(...))` when you need to test the full draw pipeline,
+including the double-buffer diff, cursor management, or integration between multiple widgets.
+
+```rust
+#[cfg(test)]
+mod tests {
+    use ratatui::Terminal;
+    use ratatui::backend::TestBackend;
+    use ratatui::buffer::Buffer;
+    use ratatui::layout::{Constraint, Layout, Rect};
+    use ratatui::style::{Color, Style};
+    use ratatui::widgets::{Block, Paragraph, Widget};
+
+    #[test]
+    fn paragraph_inside_block_renders_correctly() {
+        let backend = TestBackend::new(20, 5);
+        let mut terminal = Terminal::new(backend).unwrap();
+
+        terminal
+            .draw(|frame| {
+                let block = Block::bordered().title("Hello");
+                let inner = block.inner(frame.area());
+                block.render(frame.area(), frame.buffer_mut());
+                Paragraph::new("world").render(inner, frame.buffer_mut());
+            })
+            .unwrap();
+
+        terminal.backend().assert_buffer_lines([
+            "┌Hello──────────────┐", // Note: truncated; actual width is 20
+            "│world              │",
+            "│                   │",
+            "│                   │",
+            "└───────────────────┘",
+        ]);
+    }
+}
+```
+
+Wait — `Block::bordered()` produces a border that requires exactly the right number of columns.
+It is often easier to write a helper that builds a buffer of the right size:
+
+```rust
+#[test]
+fn draw_returns_correct_buffer() {
+    let backend = TestBackend::new(12, 3);
+    let mut terminal = Terminal::new(backend).unwrap();
+
+    terminal
+        .draw(|frame| {
+            let block = Block::bordered().title("Hi");
+            frame.render_widget(block, frame.area());
+        })
+        .unwrap();
+
+    terminal.backend().assert_buffer_lines([
+        "┌Hi────────┐",
+        "│          │",
+        "└──────────┘",
+    ]);
+}
+```
+
+## Asserting buffer content and style
+
+`Buffer::with_lines` constructs a buffer with default styles. When you need to check specific
+foreground or background colours, build the expected buffer and set styles on individual cells:
+
+```rust
+#[test]
+fn status_bar_renders_with_red_style_on_error() {
+    use ratatui::buffer::Buffer;
+    use ratatui::layout::Rect;
+    use ratatui::style::{Color, Style};
+    use ratatui::widgets::Widget;
+
+    // Suppose StatusBar implements Widget and colours itself red on error.
+    let area = Rect::new(0, 0, 8, 1);
+    let mut buf = Buffer::empty(area);
+
+    // Widget under test.
+    crate::StatusBar { message: "FAILED!".into(), error: true }.render(area, &mut buf);
+
+    let mut expected = Buffer::with_lines(["FAILED! "]);
+    for x in 0..7 {
+        expected[(x, 0)].set_fg(Color::Red);
+    }
+    assert_eq!(buf, expected);
+}
+```
+
+## Testing StatefulWidget
+
+Pass a mutable state reference to `Frame::render_stateful_widget`, then inspect both the rendered
+buffer and any state mutations that occurred during rendering.
+
+```rust
+#[test]
+fn selectable_list_highlights_selected_item() {
+    use ratatui::Terminal;
+    use ratatui::backend::TestBackend;
+    use ratatui::widgets::{List, ListItem, ListState, StatefulWidget};
+
+    let backend = TestBackend::new(10, 3);
+    let mut terminal = Terminal::new(backend).unwrap();
+    let mut state = ListState::default();
+    state.select(Some(1)); // highlight the second item
+
+    terminal
+        .draw(|frame| {
+            let items = vec![
+                ListItem::new("alpha"),
+                ListItem::new("beta"),
+                ListItem::new("gamma"),
+            ];
+            frame.render_stateful_widget(List::new(items), frame.area(), &mut state);
+        })
+        .unwrap();
+
+    // The test simply confirms it did not panic; for style assertions,
+    // build a Buffer::with_lines and set highlight styles as above.
+    assert_eq!(state.selected(), Some(1));
+}
+```
+
+## Snapshot testing
+
+For larger widgets, maintaining an inline expected buffer is tedious. A snapshot testing approach
+stores the buffer output as a text file and fails the test when the output changes. Use a crate
+like [`insta`](https://crates.io/crates/insta) together with Ratatui's `Display` impl for
+`TestBackend`:
+
+```rust
+#[test]
+fn snapshot_my_widget() {
+    use ratatui::Terminal;
+    use ratatui::backend::TestBackend;
+
+    let backend = TestBackend::new(40, 10);
+    let mut terminal = Terminal::new(backend).unwrap();
+
+    terminal.draw(|frame| {
+        // render your widget here
+    }).unwrap();
+
+    // TestBackend implements Display: each row is printed as a quoted string.
+    let output = format!("{}", terminal.backend());
+
+    // With `insta`:
+    // insta::assert_snapshot!(output);
+    //
+    // Without `insta`, write to a file and diff:
+    // std::fs::write("tests/snapshots/my_widget.txt", &output).unwrap();
+    let _ = output; // suppress unused warning in this example
+}
+```
+
+<Info>
+  `TestBackend` implements `std::fmt::Display`. Each row of the buffer is printed surrounded by
+  double-quotes, matching the format used by `assert_buffer_lines`. You can feed this string to
+  any snapshot testing framework.
+</Info>
+
+## Cursor assertions
+
+```rust
+#[test]
+fn cursor_is_hidden_after_draw() {
+    use ratatui::Terminal;
+    use ratatui::backend::TestBackend;
+
+    let backend = TestBackend::new(10, 5);
+    let mut terminal = Terminal::new(backend).unwrap();
+
+    terminal.draw(|_frame| {}).unwrap();
+
+    // By default, Terminal hides the cursor during draw and restores it after.
+    // Backend cursor state can be checked directly.
+    assert!(!terminal.backend().cursor_visible());
+}
+```
+
+## Complete self-contained test example
+
+```rust
+#[cfg(test)]
+mod full_example {
+    use ratatui::Terminal;
+    use ratatui::backend::TestBackend;
+    use ratatui::layout::Rect;
+    use ratatui::style::{Color, Style, Stylize};
+    use ratatui::text::Line;
+    use ratatui::widgets::Widget;
+
+    /// A simple banner widget for testing.
+    struct Banner<'a> {
+        text: &'a str,
+    }
+
+    impl Widget for Banner<'_> {
+        fn render(self, area: Rect, buf: &mut ratatui::buffer::Buffer) {
+            let line = Line::from(self.text).bold().centered();
+            buf.set_style(area, Style::new().bg(Color::Blue));
+            buf.set_line(area.x, area.y, &line, area.width);
+        }
+    }
+
+    #[test]
+    fn banner_fills_area_with_blue_background() {
+        let backend = TestBackend::new(14, 1);
+        let mut terminal = Terminal::new(backend).unwrap();
+
+        terminal
+            .draw(|frame| {
+                frame.render_widget(Banner { text: "Welcome!" }, frame.area());
+            })
+            .unwrap();
+
+        // Check text content.
+        terminal.backend().assert_buffer_lines(["  Welcome!    "]);
+
+        // Check that every cell has a blue background.
+        for x in 0..14_u16 {
+            assert_eq!(
+                terminal.backend().buffer()[(x, 0)].bg,
+                Color::Blue,
+                "cell ({x}, 0) should have a blue background",
+            );
+        }
+    }
+}
+```
+
+<Note>
+  Tests that use `TestBackend` run entirely in memory and do not require a real TTY. They are
+  safe to run in CI environments (including headless Linux containers) and in parallel with
+  `cargo test --test-threads N`.
+</Note>

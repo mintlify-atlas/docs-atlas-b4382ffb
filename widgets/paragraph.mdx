@@ -1,0 +1,193 @@
+---
+title: "Paragraph Widget: Styled Text Display in Ratatui"
+sidebarTitle: "Paragraph"
+description: "Display styled, wrapped, aligned, and scrollable text in Ratatui using the Paragraph widget — with Line, Span, and Wrap configuration examples."
+---
+
+`Paragraph` is the workhorse widget for displaying text in Ratatui. It renders a block of text
+that can be styled at the widget, line, and span level; word- or character-wrapped to fit its
+render area; aligned left, right, or center; and scrolled to reveal content that does not fit on
+screen. Wrapping an optional `Block` gives the paragraph a title and border without any extra
+layout work.
+
+## Creating a Paragraph
+
+`Paragraph::new` accepts anything that converts to `Text` — a string literal, `String`, `Line`,
+`Vec<Line>`, or a fully constructed `Text` value:
+
+```rust
+use ratatui::widgets::Paragraph;
+
+// From a plain string
+let p = Paragraph::new("Hello, world!");
+
+// From a String
+let p = Paragraph::new(String::from("Hello, world!"));
+
+// From a single Line
+use ratatui::text::Line;
+let p = Paragraph::new(Line::from("Hello, world!"));
+```
+
+## Styled Text with Lines and Spans
+
+Real-world paragraphs are composed from `Line` and `Span` values. A `Span` is a contiguous run of
+characters with a single style; a `Line` is an ordered collection of spans that renders on one
+terminal row:
+
+```rust
+use ratatui::layout::Alignment;
+use ratatui::style::{Style, Stylize};
+use ratatui::text::{Line, Span};
+use ratatui::widgets::{Block, Paragraph, Wrap};
+
+let text = vec![
+    Line::from(vec![
+        Span::raw("First "),
+        Span::styled("line", Style::new().green().italic()),
+        ".".into(),
+    ]),
+    Line::from("Second line".red()),
+    "Third line".into(),
+];
+
+let paragraph = Paragraph::new(text)
+    .block(Block::bordered().title("Paragraph"))
+    .style(Style::new().white().on_black())
+    .alignment(Alignment::Center)
+    .wrap(Wrap { trim: true });
+```
+
+## Alignment
+
+Three alignment variants are available. Use the method form or the convenience shorthands:
+
+```rust
+use ratatui::layout::Alignment;
+use ratatui::widgets::Paragraph;
+
+// Explicit enum
+let p = Paragraph::new("text").alignment(Alignment::Center);
+
+// Convenience shorthands
+let p = Paragraph::new("text").left_aligned();
+let p = Paragraph::new("text").centered();
+let p = Paragraph::new("text").right_aligned();
+```
+
+Alignment can also be set per-`Line` by calling `.left_aligned()`, `.centered()`, or
+`.right_aligned()` on individual `Line` values before passing them to `Paragraph`.
+
+## Text Wrapping
+
+By default `Paragraph` does **not** wrap — long lines are truncated at the widget boundary. Enable
+wrapping with `Wrap`:
+
+```rust
+use ratatui::widgets::{Paragraph, Wrap};
+
+// Word-wrap, trimming leading whitespace on continuation lines
+let p = Paragraph::new("A very long line…").wrap(Wrap { trim: true });
+
+// Word-wrap, preserving indentation
+let p = Paragraph::new("A very long line…").wrap(Wrap { trim: false });
+```
+
+`Wrap { trim: true }` trims leading whitespace from continuation lines, which produces cleaner
+output for prose. `Wrap { trim: false }` preserves indentation and is better for pre-formatted or
+bullet-point content.
+
+<Info>
+  Ratatui wraps at word boundaries (whitespace). For finer-grained Unicode-aware wrapping, consider
+  the [`textwrap`](https://crates.io/crates/textwrap) crate to pre-wrap your text and then pass
+  the result as lines to `Paragraph`.
+</Info>
+
+## Scrolling
+
+Scroll the displayed text by passing a `(row_offset, col_offset)` tuple. Note the tuple is
+`(vertical, horizontal)`, which is the opposite of the `(x, y)` convention used elsewhere:
+
+```rust
+use ratatui::widgets::Paragraph;
+
+// Show the content starting from the third row
+let p = Paragraph::new("line1\nline2\nline3\nline4")
+    .scroll((2, 0));
+```
+
+Store the scroll offset in your application state and update it in your event loop:
+
+```rust
+use ratatui::widgets::Paragraph;
+
+struct App {
+    scroll: u16,
+}
+
+impl App {
+    fn render_text(&self) -> Paragraph {
+        Paragraph::new(self.long_text())
+            .wrap(Wrap { trim: true })
+            .scroll((self.scroll, 0))
+    }
+#   fn long_text(&self) -> &str { "" }
+}
+```
+
+## Block Integration
+
+Wrap the paragraph in a `Block` to add a border and title. The paragraph renders inside the block's
+inner area automatically:
+
+```rust
+use ratatui::style::Stylize;
+use ratatui::widgets::{Block, Paragraph, Wrap};
+
+let paragraph = Paragraph::new("Press 'q' to quit.")
+    .block(Block::bordered().title("Help"))
+    .style(Style::new().white().on_blue())
+    .wrap(Wrap { trim: true });
+```
+
+## Complete Example
+
+```rust
+use ratatui::Frame;
+use ratatui::layout::Alignment;
+use ratatui::style::{Style, Stylize};
+use ratatui::text::{Line, Span};
+use ratatui::widgets::{Block, BorderType, Paragraph, Wrap};
+
+fn render(frame: &mut Frame) {
+    let area = frame.area();
+
+    let text = vec![
+        Line::from(vec![
+            Span::styled("Warning: ", Style::new().yellow().bold()),
+            Span::raw("disk usage is above 90%."),
+        ]),
+        Line::from(""),
+        Line::from("Free up space or add storage capacity.".italic()),
+    ];
+
+    let paragraph = Paragraph::new(text)
+        .block(
+            Block::bordered()
+                .title(" Disk Alert ")
+                .border_type(BorderType::Rounded)
+                .border_style(Style::new().yellow()),
+        )
+        .style(Style::new().white().on_black())
+        .alignment(Alignment::Left)
+        .wrap(Wrap { trim: true });
+
+    frame.render_widget(paragraph, area);
+}
+```
+
+<Tip>
+  If you only need to render a single unstyled or lightly styled line without wrapping or a block,
+  render a `Line` or `Text` value directly via `frame.render_widget`. `Paragraph` adds overhead
+  that is unnecessary for simple cases.
+</Tip>

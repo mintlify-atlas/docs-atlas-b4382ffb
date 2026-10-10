@@ -1,0 +1,274 @@
+---
+title: "Ratatui Macros: Reducing UI Boilerplate"
+sidebarTitle: "Macros"
+description: "Complete reference for all Ratatui declarative macros — span!, line!, text!, constraints!, constraint!, vertical!, horizontal!, and row! — with real syntax and examples."
+---
+
+The `ratatui-macros` crate provides eight declarative macros that eliminate repetitive boilerplate when building terminal UIs. They cover the three main areas of Ratatui code: styled text, layout constraints, and table rows. All macros are available through the `macros` feature of the main `ratatui` crate (enabled by default), or you can depend on `ratatui-macros` directly if you only need the macros.
+
+## Enabling the Macros
+
+<CodeGroup>
+```toml Via ratatui (recommended)
+[dependencies]
+# macros feature is included in the default feature set
+ratatui = "0.30.2"
+```
+
+```toml Via ratatui-macros directly
+[dependencies]
+ratatui-macros = "0.7.2"
+```
+</CodeGroup>
+
+```rust
+// When using ratatui with the macros feature:
+use ratatui::macros::{span, line, text, constraints, constraint, vertical, horizontal, row};
+
+// When using ratatui-macros directly:
+use ratatui_macros::{constraint, constraints, horizontal, line, row, span, text, vertical};
+```
+
+<Note>
+`ratatui-macros` is a `no_std` crate — the macros expand to pure `alloc` code and are safe to use in embedded environments.
+</Note>
+
+---
+
+## Text Macros
+
+All three text macros — `span!`, `line!`, and `text!` — accept an optional **`style =>`** prefix that sets a style on the resulting value while preserving the styles of any child elements.
+
+### `span!`
+
+Creates a [`Span`](https://docs.rs/ratatui-core/latest/ratatui_core/text/struct.Span.html) — the smallest unit of styled text.
+
+```rust
+use ratatui::style::{Color, Modifier, Style, Stylize};
+use ratatui::macros::span;
+
+let name = "world!";
+
+// Plain span using format syntax
+let raw = span!("hello {name}");
+
+// Span with a full Style value
+let styled = span!(Style::new().green() => "hello {name}");
+
+// Span with a Color shorthand
+let colored = span!(Color::Green => "hello {name}");
+
+// Span with a Modifier
+let bold = span!(Modifier::BOLD => "hello {name}");
+```
+
+The text content follows standard Rust format-string syntax, so `{variable}` and `{value:>10}` interpolations all work.
+
+### `line!`
+
+Creates a [`Line`](https://docs.rs/ratatui-core/latest/ratatui_core/text/struct.Line.html) containing a sequence of `Span`s. Behaves like `vec!` — each element is converted to a `Span` via `Into::into`. Supports the `style =>` prefix and the `; count` repetition syntax.
+
+```rust
+use ratatui::style::{Color, Stylize};
+use ratatui::macros::{line, span};
+
+let name = "world!";
+
+// A line from string literals
+let line = line!["hello", "world"];
+
+// Mix raw strings and styled spans
+let line = line!["hello ", span!(Color::Green => "{name}")];
+
+// Use Stylize trait methods on string literals
+let line = line!["Name: ".bold(), "Remy".italic()];
+
+// Repeat a span N times
+let line = line!["bye"; 2];
+
+// Apply a style to the whole line while keeping child styles
+let line = line![Color::Blue => "hello ", name];
+let line = line![Color::Blue => "bye"; 2];
+```
+
+### `text!`
+
+Creates a [`Text`](https://docs.rs/ratatui-core/latest/ratatui_core/text/struct.Text.html) containing a sequence of `Line`s. Behaves like `vec!` — each element is converted to a `Line` via `Into::into`. Supports the `style =>` prefix and the `; count` repetition syntax.
+
+```rust
+use ratatui::style::{Modifier, Stylize};
+use ratatui::macros::{line, span, text};
+
+let name = "world!";
+
+// Text from string literals (each becomes a Line)
+let t = text!["hello", format!("{name}")];
+
+// Repeat a line N times
+let t = text!["bye"; 2];
+
+// Apply a Modifier style to the whole text block
+let t = text![Modifier::BOLD => "hello", name];
+let t = text![Modifier::BOLD => "bye"; 2];
+
+// Compose from existing Line and Span values
+let name = "Bye!!!";
+let t = text![
+    line!["hello", "world".bold()],
+    span!(Modifier::BOLD => "{name}"),
+];
+```
+
+---
+
+## Layout Macros
+
+These macros build on Ratatui's `Layout` and `Constraint` types. If you are new to the layout system, see the [Layout concepts](/concepts/layout) guide first.
+
+### `constraint!`
+
+Creates a single [`Constraint`](https://docs.rs/ratatui-core/latest/ratatui_core/layout/enum.Constraint.html) value using concise operator syntax.
+
+| Syntax | Constraint variant |
+|---|---|
+| `==50` | `Constraint::Length(50)` |
+| `==30%` | `Constraint::Percentage(30)` |
+| `>=3` | `Constraint::Min(3)` |
+| `<=10` | `Constraint::Max(10)` |
+| `==1/2` | `Constraint::Ratio(1, 2)` |
+| `*=1` | `Constraint::Fill(1)` |
+
+```rust
+use ratatui::layout::Layout;
+use ratatui::macros::constraint;
+
+let layout = Layout::horizontal([constraint!(==50)]);
+```
+
+### `constraints!`
+
+Creates an **array** of `Constraint` values using the same operator syntax, separated by commas.
+
+```rust
+use ratatui::layout::Layout;
+use ratatui::macros::constraints;
+
+let layout = Layout::horizontal(constraints![==50, ==30%, >=3, <=1, ==1/2, *=1]);
+```
+
+This is the idiomatic way to specify multi-column or multi-row layouts.
+
+### `vertical!` and `horizontal!`
+
+Shortcuts for constructing a [`Layout`](https://docs.rs/ratatui-core/latest/ratatui_core/layout/struct.Layout.html) directly, oriented vertically or horizontally respectively. The same constraint syntax applies.
+
+```rust
+use ratatui::layout::Rect;
+use ratatui::macros::{vertical, horizontal};
+
+// area: Rect provided by the Frame
+let area = Rect { x: 0, y: 0, width: 80, height: 24 };
+
+// Split vertically into three sections
+let [top, main, bottom] = vertical![==1, *=1, >=3].areas(area);
+
+// Split the main section horizontally
+let [left, content, right] = horizontal![>=20, *=1, >=20].areas(main);
+```
+
+<Tip>
+`vertical!` and `horizontal!` return a `Layout` value, so you can chain any `Layout` method (e.g. `.spacing(1)`, `.flex(Flex::SpaceBetween)`) before calling `.areas()` or `.split()`.
+</Tip>
+
+---
+
+## Table Macros
+
+### `row!`
+
+Creates a [`Row`](https://docs.rs/ratatui-widgets/latest/ratatui_widgets/table/struct.Row.html) for a [`Table`](https://docs.rs/ratatui-widgets/latest/ratatui_widgets/table/struct.Table.html) widget. Each argument becomes a [`Cell`](https://docs.rs/ratatui-widgets/latest/ratatui_widgets/table/struct.Cell.html). Behaves like `vec!` — elements are converted via `Into::into`.
+
+```rust
+use ratatui::style::{Modifier, Stylize};
+use ratatui::macros::{constraints, line, row, span, text};
+use ratatui::widgets::Table;
+
+let rows = [
+    row!["hello", "world"],
+    row!["goodbye", "world"],
+    row![
+        text!["line 1", line!["Line", "2".bold()]],
+        span!(Modifier::BOLD => "Cell 2"),
+    ],
+];
+
+let table = Table::new(rows, constraints![==20, *=1]);
+```
+
+---
+
+## Complete Example
+
+The following example combines text, layout, and table macros in a realistic render function:
+
+```rust
+use ratatui::Frame;
+use ratatui::layout::Rect;
+use ratatui::style::{Color, Modifier, Stylize};
+use ratatui::macros::{constraints, horizontal, line, row, span, text, vertical};
+use ratatui::widgets::{Block, Paragraph, Table};
+
+fn render(frame: &mut Frame) {
+    let area = frame.area();
+
+    // Split the terminal into header / body / footer
+    let [header, body, footer] = vertical![==1, *=1, ==1].areas(area);
+
+    // Header: a single styled line
+    let title = line![Color::Cyan => "My TUI App", " — press q to quit".dark_gray()];
+    frame.render_widget(Paragraph::new(title), header);
+
+    // Body: sidebar + main content
+    let [sidebar, content] = horizontal![==20, *=1].areas(body);
+
+    // Sidebar: a styled text block
+    let info = text![
+        Modifier::BOLD => "Navigation",
+        "  > Dashboard",
+        "  > Reports",
+    ];
+    frame.render_widget(
+        Paragraph::new(info).block(Block::bordered()),
+        sidebar,
+    );
+
+    // Main content: a simple table
+    let rows = [
+        row!["Alice", "Engineer",  span!(Color::Green  => "Active")],
+        row!["Bob",   "Designer",  span!(Color::Yellow => "Away")],
+        row!["Carol", "Manager",   span!(Color::Red    => "Offline")],
+    ];
+    let table = Table::new(rows, constraints![==10, ==10, *=1])
+        .block(Block::bordered().title("Team"));
+    frame.render_widget(table, content);
+
+    // Footer
+    let status = span!(Color::DarkGray => "ratatui v0.30.2");
+    frame.render_widget(Paragraph::new(line![status]), footer);
+}
+```
+
+---
+
+## Summary Table
+
+| Macro | Category | Creates |
+|---|---|---|
+| `span!` | Text | A single `Span` with optional style |
+| `line!` | Text | A `Line` of `Span`s, supports `style =>` and `; count` |
+| `text!` | Text | A `Text` of `Line`s, supports `style =>` and `; count` |
+| `constraint!` | Layout | A single `Constraint` using operator syntax |
+| `constraints!` | Layout | An array of `Constraint`s |
+| `vertical!` | Layout | A vertical `Layout` from constraints |
+| `horizontal!` | Layout | A horizontal `Layout` from constraints |
+| `row!` | Table | A `Row` of `Cell`s for use in `Table` |

@@ -1,0 +1,236 @@
+---
+title: "Block Widget: Borders, Titles, and Padding in Ratatui"
+sidebarTitle: "Block"
+description: "Learn how to use Ratatui's Block widget to add borders, titles, padding, and styling to any widget — the universal visual container for terminal UIs."
+---
+
+`Block` is the foundational container widget in Ratatui. It draws a configurable border around an
+area, optionally adds one or more titles at the top or bottom, applies padding inside the border,
+and provides a background style for the enclosed region. Almost every other widget — `Paragraph`,
+`List`, `Table`, `Chart`, and more — accepts an optional `Block` to frame its content.
+
+## Creating a Block
+
+The two most common starting points are `Block::new()` (no borders) and `Block::bordered()` (all
+four borders enabled, equivalent to `.borders(Borders::ALL)`):
+
+```rust
+use ratatui::widgets::Block;
+
+// No border at all
+let plain = Block::new().title("Title");
+
+// Full border — the most common pattern
+let bordered = Block::bordered().title("My Widget");
+```
+
+## Border Sides
+
+`Borders` is a bitflag type. You can combine individual sides with `|`:
+
+```rust
+use ratatui::widgets::{Block, Borders};
+
+// Individual sides
+Block::new().borders(Borders::TOP);
+Block::new().borders(Borders::BOTTOM);
+Block::new().borders(Borders::LEFT);
+Block::new().borders(Borders::RIGHT);
+
+// Combinations
+Block::new().borders(Borders::TOP | Borders::BOTTOM);
+Block::new().borders(Borders::LEFT | Borders::RIGHT);
+
+// All four sides (same as Block::bordered())
+Block::new().borders(Borders::ALL);
+
+// Explicitly no border
+Block::new().borders(Borders::NONE);
+```
+
+## Border Types
+
+`BorderType` controls the set of Unicode box-drawing characters used for the border lines:
+
+```rust
+use ratatui::widgets::{Block, BorderType};
+
+// Plain (default): ┌───┐ │   │ └───┘
+Block::bordered().border_type(BorderType::Plain);
+
+// Rounded corners: ╭───╮ │   │ ╰───╯
+Block::bordered().border_type(BorderType::Rounded);
+
+// Double lines: ╔═══╗ ║   ║ ╚═══╝
+Block::bordered().border_type(BorderType::Double);
+
+// Thick lines: ┏━━━┓ ┃   ┃ ┗━━━┛
+Block::bordered().border_type(BorderType::Thick);
+
+// Light double-dashed: ┌╌╌╌┐
+Block::bordered().border_type(BorderType::LightDoubleDashed);
+
+// Heavy double-dashed: ┏╍╍╍┓
+Block::bordered().border_type(BorderType::HeavyDoubleDashed);
+```
+
+## Titles
+
+Titles can be placed on the top or bottom of the block. You can add as many as you like; they are
+separated by spaces when they share the same edge. Pass anything that converts to a `Line` —
+`&str`, `String`, or a styled `Line`:
+
+```rust
+use ratatui::text::Line;
+use ratatui::widgets::Block;
+
+// Simple string title on the top (default position)
+let block = Block::bordered().title("My Block");
+
+// Explicit top/bottom positioning
+let block = Block::bordered()
+    .title_top("Header")
+    .title_bottom("Footer");
+
+// Multiple titles with different alignments on the same edge
+let block = Block::bordered()
+    .title_top(Line::from("Left").left_aligned())
+    .title_top(Line::from("Center").centered())
+    .title_top(Line::from("Right").right_aligned())
+    .title_bottom("Status: OK");
+```
+
+<Note>
+  Prior to Ratatui v0.30.0 titles were created with a `block::Title` struct. That type has been
+  removed. Use `Line` with alignment and the `title_top` / `title_bottom` methods instead.
+</Note>
+
+## Styling
+
+`Block` supports several independent style layers:
+
+```rust
+use ratatui::style::{Color, Style, Stylize};
+use ratatui::widgets::{Block, BorderType};
+
+let block = Block::bordered()
+    // Background and foreground color for the whole block area
+    .style(Style::new().on_dark_gray())
+    // Color / modifier applied only to the border characters
+    .border_style(Style::new().cyan().bold())
+    // Border line type
+    .border_type(BorderType::Rounded)
+    // Style applied to all titles (can be overridden per-title via Line styling)
+    .title_style(Style::new().white().bold())
+    .title("Styled Block");
+```
+
+`Block` also implements the `Stylize` trait, so you can use shorthand methods:
+
+```rust
+use ratatui::style::Stylize;
+use ratatui::widgets::Block;
+
+let block = Block::bordered().red().on_black().bold();
+```
+
+## Padding
+
+Use `Padding` to add space between the border and the inner content:
+
+```rust
+use ratatui::widgets::{Block, Padding};
+
+// Equal padding on all sides
+let block = Block::bordered().padding(Padding::uniform(1));
+
+// Asymmetric padding
+let block = Block::bordered().padding(Padding::new(
+    2, // left
+    2, // right
+    1, // top
+    1, // bottom
+));
+
+// Horizontal / vertical shorthands
+let block = Block::bordered().padding(Padding::horizontal(2));
+let block = Block::bordered().padding(Padding::vertical(1));
+```
+
+## Using Block as a Container
+
+The most important `Block` method for composition is `inner`, which returns the `Rect` that lies
+inside the borders, titles, and padding. Render the block first, then render the child widget in
+the returned area:
+
+```rust
+use ratatui::Frame;
+use ratatui::widgets::{Block, Paragraph};
+
+fn render(frame: &mut Frame) {
+    let outer = Block::bordered().title("Outer");
+    let inner = Block::bordered().title("Inner");
+
+    let outer_area = frame.area();
+    let inner_area = outer.inner(outer_area);
+
+    frame.render_widget(outer, outer_area);
+    frame.render_widget(inner, inner_area);
+}
+```
+
+In practice you rarely call `inner` yourself because widgets that accept a `.block()` method do
+this automatically:
+
+```rust
+use ratatui::widgets::{Block, Paragraph};
+
+// Paragraph handles the inner() calculation for you
+let paragraph = Paragraph::new("Hello, world!")
+    .block(Block::bordered().title("Greeting"));
+```
+
+## Complete Example
+
+```rust
+use ratatui::Frame;
+use ratatui::layout::{Constraint, Layout};
+use ratatui::style::{Color, Style, Stylize};
+use ratatui::text::Line;
+use ratatui::widgets::{Block, BorderType, Padding, Paragraph};
+
+fn render(frame: &mut Frame) {
+    let area = frame.area();
+
+    let block = Block::bordered()
+        .title_top(Line::from(" My App ").centered())
+        .title_bottom(Line::from(" Press q to quit ").centered())
+        .border_type(BorderType::Rounded)
+        .border_style(Style::new().cyan())
+        .style(Style::new().on_black())
+        .padding(Padding::uniform(1));
+
+    let inner_area = block.inner(area);
+    frame.render_widget(block, area);
+
+    let content = Paragraph::new("Content goes here").centered();
+    frame.render_widget(content, inner_area);
+}
+```
+
+## Shadow Effect
+
+`Block` supports an optional drop shadow rendered behind the block using `Block::shadow`:
+
+```rust
+use ratatui::widgets::block::{Block, Shadow};
+
+let block = Block::bordered()
+    .title("Popup")
+    .shadow(Shadow::default());
+```
+
+<Tip>
+  Use `Block::bordered()` as your default starting point — it is the most legible and common
+  pattern. Switch to `BorderType::Rounded` for a softer look that works well in modern terminals.
+</Tip>

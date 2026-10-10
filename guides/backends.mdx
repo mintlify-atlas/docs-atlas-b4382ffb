@@ -1,0 +1,239 @@
+---
+title: "Choosing and Configuring a Ratatui Backend"
+sidebarTitle: "Backends"
+description: "Compare Crossterm, Termion, Termwiz, and Termina backends, select one via feature flags, and build Terminal with a custom backend."
+---
+
+Ratatui separates rendering logic from terminal I/O through a `Backend` trait. Every real backend
+wraps a different underlying terminal library — Crossterm, Termion, Termwiz, or Termina — while
+a `TestBackend` renders into an in-memory buffer for unit tests. You select a backend at compile
+time via Cargo feature flags; only one is needed for most applications.
+
+## Platform support at a glance
+
+| Backend | Crate feature | Linux | macOS | Windows | Notes |
+|---|---|:---:|:---:|:---:|---|
+| **Crossterm** | `crossterm` *(default)* | ✅ | ✅ | ✅ | Recommended for new projects |
+| **Termion** | `termion` | ✅ | ✅ | ❌ | Unix/macOS only |
+| **Termwiz** | `termwiz` | ✅ | ✅ | ✅ | Advanced terminal capabilities |
+| **Termina** | `termina` | ✅ | ✅ | ✅ | Newer, lightweight alternative |
+| **TestBackend** | *(always available)* | ✅ | ✅ | ✅ | In-memory buffer for tests |
+
+## Selecting a backend in Cargo.toml
+
+<Note>
+  The `ratatui` crate enables **Crossterm** by default. You must opt out of the default features
+  before enabling a different backend to avoid compiling multiple backends unnecessarily.
+</Note>
+
+<Steps>
+  <Step title="Pick your backend feature">
+    Add `ratatui` to `Cargo.toml` with the appropriate feature flags.
+  </Step>
+  <Step title="Disable the default Crossterm feature if switching away">
+    Pass `default-features = false` when selecting Termion, Termwiz, or Termina so the default
+    Crossterm dependency is not compiled.
+  </Step>
+  <Step title="Construct the backend and terminal">
+    Use the backend-specific constructor, then wrap it in `Terminal::new`.
+  </Step>
+</Steps>
+
+### Crossterm (default)
+
+Crossterm is the recommended backend. It works on Linux, macOS, and Windows without any extra
+configuration. The `ratatui` crate enables it by default; no explicit feature flag is required.
+
+<CodeGroup>
+```toml Standard (implicit default)
+[dependencies]
+ratatui = "0.30"
+```
+
+```toml Explicit version pin to crossterm 0.28
+[dependencies]
+ratatui = { version = "0.30", features = ["crossterm_0_28"] }
+```
+
+```toml Direct ratatui-crossterm dependency
+[dependencies]
+ratatui-crossterm = { version = "0.1", features = ["crossterm_0_29"] }
+```
+</CodeGroup>
+
+```rust
+use std::io::stdout;
+use ratatui::{backend::CrosstermBackend, Terminal};
+
+let backend = CrosstermBackend::new(stdout());
+let mut terminal = Terminal::new(backend)?;
+```
+
+<Tip>
+  When using the `ratatui-crossterm` crate directly, use the re-exported
+  `ratatui_crossterm::crossterm` path for any direct Crossterm API calls. This guarantees your
+  code uses the exact same Crossterm version the backend was compiled against and avoids type
+  conflicts caused by version mismatches across your dependency graph.
+</Tip>
+
+### Termion
+
+Termion is a Unix-only backend. It does not support Windows. Disable the default Crossterm feature
+when switching to it.
+
+```toml
+[dependencies]
+ratatui = { version = "0.30", default-features = false, features = ["termion"] }
+```
+
+```rust
+use std::io::stdout;
+use ratatui::{backend::TermionBackend, Terminal};
+
+let backend = TermionBackend::new(stdout());
+let mut terminal = Terminal::new(backend)?;
+```
+
+### Termwiz
+
+Termwiz provides a richer set of terminal abstractions and works cross-platform. Its backend
+manages raw mode and the alternate screen internally via its own `SystemTerminal` type.
+
+```toml
+[dependencies]
+ratatui = { version = "0.30", default-features = false, features = ["termwiz"] }
+```
+
+```rust
+use ratatui::{backend::TermwizBackend, Terminal};
+
+// TermwizBackend::new() enters raw mode and the alternate screen automatically.
+let backend = TermwizBackend::new()?;
+let mut terminal = Terminal::new(backend)?;
+```
+
+If you need manual control, supply your own `BufferedTerminal`:
+
+```rust
+use ratatui::backend::TermwizBackend;
+use termwiz::terminal::buffered::BufferedTerminal;
+use termwiz::terminal::SystemTerminal;
+
+let buffered = BufferedTerminal::new(SystemTerminal::new_from_stdio(
+    termwiz::caps::Capabilities::new_from_env()?,
+)?)?;
+let backend = TermwizBackend::with_buffered_terminal(buffered);
+```
+
+### Termina
+
+Termina is a newer, lightweight terminal library. Its backend wraps any type implementing the
+`termina::Terminal` trait and does **not** automatically enter raw mode or the alternate screen —
+you must configure those modes yourself before constructing the backend.
+
+```toml
+[dependencies]
+ratatui = { version = "0.30", default-features = false, features = ["termina"] }
+```
+
+```rust
+use ratatui::{backend::TerminaBackend, Terminal};
+// Configure raw mode and alternate screen via Termina APIs before this point.
+let term = ratatui_termina::termina::UnixTerminal::new()?;
+let backend = TerminaBackend::new(term);
+let mut terminal = Terminal::new(backend)?;
+```
+
+<Info>
+  The Termina crate is re-exported as `ratatui_termina::termina`, so you can use its types
+  directly alongside Ratatui rendering without adding a separate `termina` dependency.
+</Info>
+
+## The Backend trait
+
+All backends implement `ratatui_core::backend::Backend`. You generally interact with the backend
+indirectly through `Terminal`, but understanding the trait helps when writing custom backends or
+tests.
+
+```rust
+pub trait Backend {
+    type Error: core::error::Error;
+
+    // Draw a batch of (x, y, &Cell) tuples to the terminal.
+    fn draw<'a, I>(&mut self, content: I) -> Result<(), Self::Error>
+    where
+        I: Iterator<Item = (u16, u16, &'a Cell)>;
+
+    fn hide_cursor(&mut self) -> Result<(), Self::Error>;
+    fn show_cursor(&mut self) -> Result<(), Self::Error>;
+
+    fn get_cursor_position(&mut self) -> Result<Position, Self::Error>;
+    fn set_cursor_position<P: Into<Position>>(&mut self, position: P) -> Result<(), Self::Error>;
+
+    fn clear(&mut self) -> Result<(), Self::Error>;
+    fn clear_region(&mut self, clear_type: ClearType) -> Result<(), Self::Error>;
+
+    fn size(&self) -> Result<Size, Self::Error>;
+    fn window_size(&mut self) -> Result<WindowSize, Self::Error>;
+    fn flush(&mut self) -> Result<(), Self::Error>;
+}
+```
+
+Key points:
+
+- `draw` receives an iterator of `(x, y, &Cell)` — Ratatui calls this after diffing its double
+  buffers, passing only the cells that changed.
+- `flush` is a backend-level I/O flush and is distinct from `Terminal::flush`, which computes the
+  diff and sends draw commands.
+- `clear_region` accepts a `ClearType` variant (`All`, `AfterCursor`, `BeforeCursor`,
+  `CurrentLine`, `UntilNewLine`). Backends that do not support partial clearing return an error for
+  variants other than `All`.
+
+## Manual Terminal construction
+
+`ratatui::init()` is the recommended entry point for most applications; it calls
+`CrosstermBackend::new(stdout())` internally and enables raw mode and the alternate screen. Use
+`Terminal::new` directly when you need a different backend or custom options:
+
+```rust
+use std::io::stdout;
+use ratatui::{
+    backend::CrosstermBackend,
+    Terminal, TerminalOptions, Viewport,
+};
+
+// Full-screen terminal (the default).
+let terminal = Terminal::new(CrosstermBackend::new(stdout()))?;
+
+// Inline terminal that occupies 10 rows within the existing CLI output.
+let terminal = Terminal::with_options(
+    CrosstermBackend::new(stdout()),
+    TerminalOptions {
+        viewport: Viewport::Inline(10),
+    },
+)?;
+```
+
+<Warning>
+  When constructing `Terminal` manually you are responsible for enabling raw mode, entering the
+  alternate screen, and restoring the terminal on exit. Failing to restore the terminal leaves
+  the user's shell in an unusable state. Pair every setup call with a matching teardown — ideally
+  using a guard type or a `defer`/`Drop` pattern.
+</Warning>
+
+## Optional backend features
+
+Each backend crate exposes a small set of optional Cargo features that you can enable through the
+top-level `ratatui` crate:
+
+| Feature | Backends | Description |
+|---|---|---|
+| `underline-color` | Crossterm, Termwiz, Termina | Sets cell underline colors (not supported on Windows 7) |
+| `scrolling-regions` | All | Uses terminal scrolling regions for smoother `insert_before` |
+| `serde` | All | Serializes/deserializes style and color types |
+| `unstable-backend-writer` | Crossterm, Termion, Termina | Exposes the wrapped writer for direct access |
+
+```toml
+[dependencies]
+ratatui = { version = "0.30", features = ["underline-color", "scrolling-regions"] }
+```

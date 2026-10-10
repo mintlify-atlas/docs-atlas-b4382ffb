@@ -1,0 +1,195 @@
+---
+title: "Rendering: Immediate Mode and the Buffer Model"
+sidebarTitle: "Rendering"
+description: "How Ratatui's immediate-mode rendering works, how the Buffer and Frame interact, and how diffs are written to the terminal each frame."
+---
+
+Ratatui uses an **immediate-mode rendering** model: every time you call `Terminal::draw()`, you must render the entire UI from scratch. There is no retained widget tree that remembers what was on screen—each draw callback describes the complete desired state of the frame. Ratatui then compares that state against the previous frame using a buffer diff and writes only the changed cells to the terminal, keeping output minimal and flicker-free.
+
+## The Buffer
+
+At the heart of rendering is the `Buffer` type. A `Buffer` is a two-dimensional grid of `Cell` values, one per terminal character position. Each `Cell` stores a symbol (a string of one or more Unicode grapheme clusters that occupy exactly one terminal column), a foreground color, a background color, and text modifiers.
+
+`Terminal` maintains two buffers internally:
+
+- **Current buffer** — written during the active draw pass.
+- **Previous buffer** — the state that was actually displayed after the last draw pass.
+
+After each draw pass, `Terminal` diffs the two buffers and produces a minimal set of escape sequences to move the cursor and update only the cells that changed. The buffers are then swapped so the previous frame becomes the baseline for the next diff.
+
+```
+┌─────────────────────────────┐     ┌─────────────────────────────┐
+│        Current Buffer       │ ──► │      Diff (changed cells)   │ ──► terminal
+└─────────────────────────────┘     └─────────────────────────────┘
+           ▲ merge                              ▲ compare
+┌─────────────────────────────┐
+│       Previous Buffer       │
+└─────────────────────────────┘
+```
+
+Because the diff is cell-level, widgets that didn't change produce no terminal output even though your render callback re-describes them every frame. This makes immediate-mode rendering affordable even for complex UIs.
+
+## Frame vs Terminal
+
+`Terminal` is the long-lived owner of backends and buffers. `Frame` is a short-lived view into that state that exists only for the duration of a single draw callback.
+
+| | `Terminal<B>` | `Frame<'a>` |
+|--|--|--|
+| **Lifetime** | Lives as long as your app | Lives for one draw callback |
+| **Owns** | Backend, both buffers, viewport | Borrow of current buffer + viewport area |
+| **Used for** | `draw()`, `resize()`, backend config | `render_widget()`, `render_stateful_widget()`, `set_cursor_position()` |
+| **Area query** | — | `frame.area()` |
+
+You never construct a `Frame` directly. It is handed to the closure you pass to `Terminal::draw()` or `Terminal::try_draw()`.
+
+## A Complete Render Function
+
+```rust
+use ratatui::Frame;
+use ratatui::layout::{Constraint, Layout};
+use ratatui::widgets::{Block, Paragraph};
+
+fn render(frame: &mut Frame) {
+    // Split the full frame area into three vertical sections.
+    let [header, body, footer] = Layout::vertical([
+        Constraint::Length(1),
+        Constraint::Min(0),
+        Constraint::Length(1),
+    ])
+    .areas(frame.area());
+
+    // Render each section independently.
+    frame.render_widget(Paragraph::new("My App"), header);
+    frame.render_widget(Block::bordered().title("Content"), body);
+    frame.render_widget(Paragraph::new("Press q to quit"), footer);
+}
+```
+
+`frame.area()` returns the `Rect` that represents the usable viewport area for this pass. Always use this as the root area for layout calculations instead of hard-coding a size.
+
+## `render_widget` vs `render_stateful_widget`
+
+<CardGroup cols={2}>
+  <Card title="render_widget" icon="paintbrush">
+    Renders a widget that is entirely self-contained—it needs no external state to decide how to draw itself. Calls `Widget::render(self, area, buf)`, consuming the widget.
+
+    ```rust
+    frame.render_widget(Paragraph::new("Hello"), area);
+    ```
+  </Card>
+  <Card title="render_stateful_widget" icon="database">
+    Renders a widget that reads from (and may mutate) an associated state value—for example, a `List` that tracks which item is selected. The state persists between frames in your application struct.
+
+    ```rust
+    frame.render_stateful_widget(
+        List::new(items),
+        area,
+        &mut list_state,
+    );
+    ```
+  </Card>
+</CardGroup>
+
+### How `render_stateful_widget` works
+
+```rust
+use ratatui::Frame;
+use ratatui::widgets::{List, ListItem, ListState};
+
+struct App {
+    items: Vec<String>,
+    list_state: ListState,
+}
+
+impl App {
+    fn render(&mut self, frame: &mut Frame) {
+        let items: Vec<ListItem> = self.items
+            .iter()
+            .map(|s| ListItem::new(s.as_str()))
+            .collect();
+
+        frame.render_stateful_widget(
+            List::new(items).highlight_symbol(">> "),
+            frame.area(),
+            &mut self.list_state,
+        );
+    }
+}
+```
+
+The widget itself is still rebuilt from scratch each frame. The `ListState` is what persists—it records the selected index and the scroll offset so the widget can restore them on the next render.
+
+## `CompletedFrame`
+
+`Terminal::draw()` returns a `CompletedFrame<'_>`. It holds a reference to the buffer that was just rendered, the area it covered, and an incrementing frame count:
+
+```rust
+pub struct CompletedFrame<'a> {
+    pub buffer: &'a Buffer,
+    pub area: Rect,
+    pub count: usize,
+}
+```
+
+`CompletedFrame` is primarily useful for testing and debugging. In production application code you typically ignore it:
+
+```rust
+// Most apps ignore the return value:
+terminal.draw(render)?;
+
+// Or capture it for testing:
+let frame = terminal.draw(render)?;
+assert_eq!(frame.count, 0);
+```
+
+<Warning>
+`CompletedFrame` is only valid until the next call to `draw()`. After the next draw pass, `Terminal` swaps its buffers and the reference inside `CompletedFrame` points to the now-current (in-progress) buffer. Do not store `CompletedFrame` across draw calls.
+</Warning>
+
+## What Happens When the Terminal Is Resized
+
+Ratatui does not automatically redraw on resize. When a resize event arrives, simply continue your event loop—the next `draw()` call runs `autoresize()` internally, queries the backend for the actual current size, resizes the buffers, and clears the screen before rendering:
+
+```rust
+use crossterm::event::{self, Event};
+
+loop {
+    terminal.draw(render)?;
+
+    match event::read()? {
+        Event::Resize(_, _) => {
+            // Nothing special needed—draw() will handle it on the next iteration.
+        }
+        Event::Key(key) if key.code == crossterm::event::KeyCode::Char('q') => {
+            break;
+        }
+        _ => {}
+    }
+}
+```
+
+<Tip>
+Inside the render callback, read `frame.area()` for the current size—it reflects the size that was determined at the start of this draw pass, even if a resize event arrived during rendering.
+</Tip>
+
+## Rendering Directly to a Buffer
+
+Outside of `Terminal::draw()`, you can render widgets directly by calling `Widget::render()` on any buffer you own. This is the most common approach in unit tests:
+
+```rust
+use ratatui::buffer::Buffer;
+use ratatui::layout::Rect;
+use ratatui::widgets::{Paragraph, Widget};
+
+let area = Rect::new(0, 0, 20, 3);
+let mut buf = Buffer::empty(area);
+
+Paragraph::new("Hello World!").render(area, &mut buf);
+
+// Compare with expected output:
+assert_eq!(buf, Buffer::with_lines(["Hello World!        ", "                    ", "                    "]));
+```
+
+## If Multiple Widgets Cover the Same Cell
+
+Later renders win. If two widgets both write to the same cell, the last call to `render_widget` (or `render`) is the one whose output appears in the final frame. There is no compositing—widgets are painted in order, and later paints overwrite earlier ones.

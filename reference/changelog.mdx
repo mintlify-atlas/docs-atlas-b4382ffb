@@ -1,0 +1,187 @@
+---
+title: "Ratatui Changelog and Release Highlights"
+sidebarTitle: "Changelog"
+description: "Release highlights for recent Ratatui versions, notes on semantic versioning, links to the full changelog and breaking changes for every release."
+---
+
+Ratatui follows [Semantic Versioning](https://semver.org/). Breaking changes are documented in the [Migration guide](/reference/migration) and in the dedicated [BREAKING-CHANGES.md](https://github.com/ratatui/ratatui/blob/main/BREAKING-CHANGES.md) file. The full commit-level changelog is maintained at [github.com/ratatui/ratatui/blob/main/CHANGELOG.md](https://github.com/ratatui/ratatui/blob/main/CHANGELOG.md).
+
+<Note>
+Ratatui was forked from the unmaintained `tui-rs` crate. Version 0.20.0 was the first Ratatui release. If you are migrating from `tui-rs`, see the [Migration guide](/reference/migration).
+</Note>
+
+---
+
+## v0.30.2 — 2026-06-19
+
+[Release notes](https://github.com/ratatui/ratatui/releases/tag/ratatui-v0.30.2) · [Highlights](https://ratatui.rs/highlights/v0302/)
+
+<CardGroup cols={2}>
+  <Card title="New: Termina backend" icon="plug">
+    A new `ratatui-termina` backend crate was added, using the published `termina` crate. Enable it via the `termina` feature flag. Useful for applications that work with typed escape sequences or Termina events alongside Ratatui rendering.
+  </Card>
+  <Card title="Buffer: uncovered cell fixes" icon="bug">
+    Wide characters from the previous buffer that are replaced by normal-width characters now correctly propagate background and underline styles to their trailing cells, preventing visual artifacts on re-render.
+  </Card>
+  <Card title="Scrollbar: large thumb clamping" icon="bug">
+    Fixed a regression from v0.30.0 where a large scrollbar thumb could overflow the track when scrolled to the end, overwriting the end arrow symbol.
+  </Card>
+  <Card title="CI: auto-merge gate" icon="circle-check">
+    Added a required aggregate CI status gate and enabled GitHub auto-merge, streamlining the maintainer merge workflow.
+  </Card>
+</CardGroup>
+
+---
+
+## v0.30.1 — 2026-06-05
+
+[Release notes](https://github.com/ratatui/ratatui/releases/tag/ratatui-v0.30.1) · [Highlights](https://ratatui.rs/highlights/v0301/)
+
+**MSRV bump:** The minimum supported Rust version is now **1.88.0**.
+
+<CardGroup cols={2}>
+  <Card title="Block shadows" icon="square">
+    `Block::shadow(...)` now accepts a new `Shadow` type with presets (`overlay`, `block`, `light_shade`, `medium_shade`, `dark_shade`) and support for custom symbols and effects.
+
+    ```rust
+    Block::bordered()
+        .title("Popup")
+        .shadow(Shadow::dark_shade().black().on_white())
+    ```
+  </Card>
+  <Card title="Cell diff options" icon="table-cells">
+    `CellDiffOption::AlwaysUpdate` forces cell updates even when content is identical — useful for hyperlinks and Kitty image sequences. `CellDiffOption::ForcedWidth` allows squeezing escape sequences into a single cell.
+  </Card>
+  <Card title="Table: multi-column cells" icon="table">
+    `Cell::column_span(n)` allows a cell to span multiple columns, rendering across all spanned columns and their inter-column gaps.
+  </Card>
+  <Card title="New Fill widget" icon="paint-roller">
+    The new `Fill` widget paints every cell in its area with a repeated symbol and style, integrating with the `Stylize` trait:
+
+    ```rust
+    Fill::new("░").blue().render(area, buf);
+    ```
+  </Card>
+  <Card title="Chart: filled area" icon="chart-area">
+    `GraphType::Area` and `Dataset::fill_to_y(f64)` enable filled area charts in the `Chart` widget. The `Canvas` widget gains a corresponding `FilledLine` shape.
+  </Card>
+  <Card title="Layout cache in no_std" icon="microchip">
+    The `layout-cache` feature now works in `no_std` environments using `critical-section`, enabling up to 500× higher frame rates on constrained hardware.
+  </Card>
+</CardGroup>
+
+### Breaking Change (v0.30.1)
+
+Adding `AsRef<Self>` impls for built-in widgets can affect type inference in rare cases. If you encounter new ambiguity errors, add explicit type annotations or remove redundant `AsRef` impls. See the [Migration guide](/reference/migration) for details.
+
+---
+
+## v0.30.0
+
+[Release notes](https://github.com/ratatui/ratatui/releases/tag/ratatui-v0.30.0)
+
+**MSRV bump:** The minimum supported Rust version is now **1.86.0**.
+
+This was the largest Ratatui release to date. The headline change was the modular workspace split — see the [Crate Structure](/reference/crate-structure) page for the full picture.
+
+### Key highlights
+
+<Accordion title="Modular workspace (ratatui-core, ratatui-widgets, backend crates)">
+  The monolithic `ratatui` crate was split into `ratatui-core`, `ratatui-widgets`, `ratatui-crossterm`, `ratatui-termion`, `ratatui-termwiz`, and `ratatui-macros`. All types continue to be re-exported from the main `ratatui` crate with no changes required for existing code.
+</Accordion>
+
+<Accordion title="Backend trait: associated Error type and clear_region">
+  The `Backend` trait now requires an associated `Error` type, removing the hard dependency on `std::io::Error`. Custom backend implementations must define this type and implement `clear_region`. The `TestBackend` now uses `core::convert::Infallible` as its error type.
+</Accordion>
+
+<Accordion title="Alignment renamed to HorizontalAlignment">
+  `layout::Alignment` was renamed to `layout::HorizontalAlignment` for clarity. A type alias is provided for backward compatibility, but updating imports is recommended.
+
+  ```diff
+  - use ratatui::layout::Alignment;
+  + use ratatui::layout::HorizontalAlignment;
+  ```
+</Accordion>
+
+<Accordion title="block::Title removed">
+  `widgets::block::Title` no longer exists. Title alignment is now expressed directly on `Line` values.
+
+  ```diff
+  - Block::default().title(Title::from("Hello").position(Position::Bottom))
+  + Block::default().title_bottom(Line::from("Hello").centered())
+  ```
+</Accordion>
+
+<Accordion title="Flex::SpaceAround now mirrors CSS flexbox">
+  `Flex::SpaceAround` now places twice as much space between items as at the outer edges, matching CSS flexbox semantics. Use `Flex::SpaceEvenly` to get the old uniform spacing.
+</Accordion>
+
+<Accordion title="Marker is now non-exhaustive">
+  The `Marker` enum is marked `#[non_exhaustive]`. Exhaustive match arms must add a wildcard.
+
+  ```diff
+    match marker {
+        Marker::Braille => { /* ... */ }
+  +     _ => {}
+    }
+  ```
+</Accordion>
+
+---
+
+## v0.29.0
+
+[Release notes](https://github.com/ratatui/ratatui/releases/tag/v0.29.0)
+
+### Key highlights
+
+<Accordion title="Sparkline: per-bar styling and absent values">
+  `Sparkline::data` now accepts `IntoIterator<Item = SparklineBar>`. `SparklineBar` holds an optional value (distinguishing absent from zero) and an optional per-bar style. Existing `&[u64]` callers may need minor type annotation updates.
+</Accordion>
+
+<Accordion title="Table: row_highlight_style">
+  `Table::highlight_style` was renamed to `Table::row_highlight_style`. The old name is deprecated but still works.
+</Accordion>
+
+<Accordion title="Tabs: select now accepts Into<Option<usize>>">
+  `Tabs::select` now takes `Into<Option<usize>>` to allow deselecting tabs. Code that passes a non-`usize` integer may need an explicit cast:
+
+  ```diff
+  let selected = 1u8;
+  - Tabs::new(["A", "B"]).select(selected.into())
+  + Tabs::new(["A", "B"]).select(selected as usize)
+  ```
+</Accordion>
+
+<Accordion title="Color::from_hsl moved behind palette feature">
+  `Color::from_hsl` now lives behind the `palette` feature flag and accepts a `palette::Hsl` value instead of three `f64` parameters.
+</Accordion>
+
+---
+
+## Earlier Versions
+
+For a complete history of all releases back to v0.20.0 (the first Ratatui release, forked from `tui-rs`), see the full [CHANGELOG.md on GitHub](https://github.com/ratatui/ratatui/blob/main/CHANGELOG.md).
+
+Notable milestones:
+
+| Version | Highlight |
+|---|---|
+| v0.28.0 | `Backend` migrates to `get/set_cursor_position`; requires Crossterm 0.28; `Frame::size` renamed to `Frame::area` |
+| v0.27.0 | `Flex` layout modes introduced; `List` clamps selected index; `Rect::inner` takes `Margin` by value |
+| v0.26.0 | `Flex::Start` becomes the default layout mode; `Table::new` and `Tabs::new` accept `IntoIterator` |
+| v0.25.0 | `Table::new` requires widths; `List::new` accepts `IntoIterator` |
+| v0.24.0 | `Frame<B: Backend>` becomes `Frame`; `Spans` removed in favour of `Line` |
+| v0.20.0 | First Ratatui release (fork of `tui-rs`) |
+
+---
+
+## Versioning Policy
+
+- **Patch releases** (0.x.**y**): Bug fixes only. No breaking changes.
+- **Minor releases** (0.**x**.0): New features. May include breaking changes; all breaking changes are documented in [BREAKING-CHANGES.md](https://github.com/ratatui/ratatui/blob/main/BREAKING-CHANGES.md).
+- **Major release** (1.0.0): Planned for when the API is considered stable. No timeline announced.
+
+<Info>
+Because Ratatui is still pre-1.0, minor version bumps may include breaking changes. Always read the breaking-changes document before upgrading across a minor version boundary.
+</Info>

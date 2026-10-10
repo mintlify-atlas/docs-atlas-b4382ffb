@@ -1,72 +1,85 @@
 {
   "$schema": "https://mintlify.com/docs.json",
-  "theme": "mint",
-  "name": "Mintlify Starter Kit",
+  "name": "Ratatui",
+  "theme": "luma",
   "colors": {
-    "primary": "#16A34A",
-    "light": "#07C983",
-    "dark": "#15803D"
+    "primary": "#82aaff",
+    "light": "#949494",
+    "dark": "#464646"
   },
-  "favicon": "/favicon.svg",
-  "navigation": {
-    "pages": [
-      {
-        "group": "Getting Started",
-        "pages": [
-          "index",
-          "quickstart"
-        ]
-      }
-    ],
-    "global": {
-      "anchors": [
-        {
-          "anchor": "Documentation",
-          "href": "https://mintlify.com/docs",
-          "icon": "book-open-cover"
-        },
-        {
-          "anchor": "Blog",
-          "href": "https://mintlify.com/blog",
-          "icon": "newspaper"
-        }
-      ]
-    }
-  },
+  "favicon": "https://icons.duckduckgo.com/ip3/ratatui.rs.ico",
   "logo": {
-    "light": "/logo/light.svg",
-    "dark": "/logo/dark.svg"
+    "light": "https://media.brand.dev/4ba73e90-2a05-4767-9ef5-6b195adc0090.png",
+    "dark": "https://media.brand.dev/ed331e99-e61b-4807-a5f1-83a12da085e1.png"
   },
   "navbar": {
-    "links": [
-      {
-        "label": "Support",
-        "href": "mailto:support@mintlify.com"
-      }
-    ],
     "primary": {
-      "type": "button",
-      "label": "Dashboard",
-      "href": "https://app.mintlify.com"
+      "type": "github",
+      "href": "https://github.com/ratatui/ratatui"
     }
-  },
-  "contextual": {
-    "options": [
-      "copy",
-      "view",
-      "chatgpt",
-      "claude",
-      "perplexity",
-      "mcp",
-      "cursor",
-      "vscode"
-    ]
   },
   "footer": {
     "socials": {
-      "x": "https://x.com/mintlify",
-      "github": "https://github.com/mintlify",
-      "linkedin": "https://linkedin.com/company/mintlify"
+      "github": "https://github.com/ratatui/ratatui"
     }
+  },
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "quickstart",
+              "installation"
+            ]
+          },
+          {
+            "group": "Core Concepts",
+            "pages": [
+              "concepts/terminal",
+              "concepts/rendering",
+              "concepts/layout",
+              "concepts/widgets",
+              "concepts/styling",
+              "concepts/event-handling"
+            ]
+          },
+          {
+            "group": "Widgets",
+            "pages": [
+              "widgets/overview",
+              "widgets/block",
+              "widgets/paragraph",
+              "widgets/list",
+              "widgets/table",
+              "widgets/chart",
+              "widgets/other-widgets"
+            ]
+          },
+          {
+            "group": "Guides",
+            "pages": [
+              "guides/backends",
+              "guides/custom-widgets",
+              "guides/async-applications",
+              "guides/testing"
+            ]
+          },
+          {
+            "group": "Reference",
+            "pages": [
+              "reference/crate-structure",
+              "reference/macros",
+              "reference/feature-flags",
+              "reference/changelog",
+              "reference/migration"
+            ]
+          }
+        ]
+      }
+    ]
   }
 }
