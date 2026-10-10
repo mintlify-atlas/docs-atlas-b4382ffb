@@ -141,7 +141,7 @@ Wrap the paragraph in a `Block` to add a border and title. The paragraph renders
 inner area automatically:
 
 ```rust
-use ratatui::style::Stylize;
+use ratatui::style::{Style, Stylize};
 use ratatui::widgets::{Block, Paragraph, Wrap};
 
 let paragraph = Paragraph::new("Press 'q' to quit.")

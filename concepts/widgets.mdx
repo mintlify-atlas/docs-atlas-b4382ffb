@@ -93,7 +93,7 @@ This pattern is recommended when your widget holds data immutably and multiple r
 
 ```rust
 pub trait StatefulWidget {
-    type State;
+    type State: ?Sized;
     fn render(self, area: Rect, buf: &mut Buffer, state: &mut Self::State);
 }
 ```

@@ -329,12 +329,15 @@ let canvas = Canvas::default()
 ```rust
 use ratatui::symbols::Marker;
 
-Marker::Braille    // 2×4 dots per cell — highest resolution (default)
-Marker::Dot        // one • per cell
-Marker::Block      // one █ per cell
-Marker::Bar        // half-block ▄ per cell
-Marker::HalfBlock  // 1×2 half blocks
-Marker::Octant     // densely packed 2×4 pseudo-pixels
+Marker::Dot                 // one • per cell (default)
+Marker::Block               // one █ per cell
+Marker::Bar                 // one ▄ per cell
+Marker::Braille             // 2×4 dots per cell — high resolution
+Marker::HalfBlock           // 2×1 per cell (double vertical resolution)
+Marker::Quadrant            // 2×2 pseudo-pixels per cell
+Marker::Sextant             // 2×3 pseudo-pixels per cell
+Marker::Octant              // 2×4 pseudo-pixels per cell
+Marker::Custom('*')         // any char, one per cell
 ```
 
 You can also print text directly on the canvas at any coordinate:
@@ -488,12 +491,12 @@ fn render(frame: &mut Frame) {
 }
 ```
 
-You can give the mascot a custom eye color:
+You can set the mascot's eye state:
 
 ```rust
 use ratatui::widgets::{MascotEyeColor, RatatuiMascot};
 
-let mascot = RatatuiMascot::default().eye_color(MascotEyeColor::Default);
+let mascot = RatatuiMascot::default().set_eye(MascotEyeColor::Default);
 ```
 
 <Tip>

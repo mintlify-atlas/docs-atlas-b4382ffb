@@ -1,5 +1,5 @@
 ---
-title: "Testing Ratatui Widgets and Applications"
+title: "Testing Ratatui Widgets and Full Terminal Applications"
 sidebarTitle: "Testing"
 description: "Use TestBackend and Buffer assertions to unit-test widget output, cursor position, and full terminal state without a real terminal."
 ---
@@ -261,8 +261,8 @@ fn cursor_is_hidden_after_draw() {
 
     terminal.draw(|_frame| {}).unwrap();
 
-    // By default, Terminal hides the cursor during draw and restores it after.
-    // Backend cursor state can be checked directly.
+    // Terminal hides the cursor after every draw call unless Frame::set_cursor_position
+    // was called inside the draw closure. The cursor stays hidden between frames.
     assert!(!terminal.backend().cursor_visible());
 }
 ```

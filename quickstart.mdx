@@ -174,14 +174,14 @@ Ratatui applications are ordinary Rust binaries. You add two dependencies, write
 
 The `ratatui::init` module exposes several initialization functions for different scenarios:
 
-| Function | Alternate Screen | Error handling | Best for |
-|---|---|---|---|
-| `ratatui::run(f)` | ✓ | Auto-cleanup | Most applications |
-| `ratatui::run_with_options(opts, f)` | ✗ | Auto-cleanup | Inline / fixed viewports |
-| `ratatui::init()` | ✓ | Panic | Standard fullscreen apps |
-| `ratatui::try_init()` | ✓ | `Result` | Apps that need custom error handling |
-| `ratatui::init_with_options(opts)` | ✗ | Panic | Custom viewport with manual teardown |
-| `ratatui::try_init_with_options(opts)` | ✗ | `Result` | Custom viewport with explicit errors |
+| Function | Alternate Screen | Raw Mode | Error Handling | Use Case |
+|---|---|---|---|---|
+| `ratatui::run(f)` | ✓ | ✓ | Auto-cleanup | Most applications |
+| `ratatui::run_with_options(opts, f)` | ✗ | ✓ | Auto-cleanup | Custom viewport apps |
+| `ratatui::init()` | ✓ | ✓ | Panic | Standard full-screen apps |
+| `ratatui::try_init()` | ✓ | ✓ | `Result` | Standard apps with error handling |
+| `ratatui::init_with_options(opts)` | ✗ | ✓ | Panic | Custom viewport apps |
+| `ratatui::try_init_with_options(opts)` | ✗ | ✓ | `Result` | Custom viewport with error handling |
 
 All initialization functions install a panic hook that restores the terminal before the hook fires. Call them **after** any other panic hooks you install so that restoration runs first.
 

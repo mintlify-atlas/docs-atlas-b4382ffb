@@ -72,6 +72,24 @@ Block::bordered().border_type(BorderType::LightDoubleDashed);
 
 // Heavy double-dashed: ┏╍╍╍┓
 Block::bordered().border_type(BorderType::HeavyDoubleDashed);
+
+// Light triple-dashed: ┌┄┄┄┐
+Block::bordered().border_type(BorderType::LightTripleDashed);
+
+// Heavy triple-dashed: ┏┅┅┅┓
+Block::bordered().border_type(BorderType::HeavyTripleDashed);
+
+// Light quadruple-dashed: ┌┈┈┈┐
+Block::bordered().border_type(BorderType::LightQuadrupleDashed);
+
+// Heavy quadruple-dashed: ┏┉┉┉┓
+Block::bordered().border_type(BorderType::HeavyQuadrupleDashed);
+
+// Quadrant inside: ▗▄▄▄▖ ▐   ▌ ▝▀▀▀▘
+Block::bordered().border_type(BorderType::QuadrantInside);
+
+// Quadrant outside: ▛▀▀▀▜ ▌   ▐ ▙▄▄▄▟
+Block::bordered().border_type(BorderType::QuadrantOutside);
 ```
 
 ## Titles
@@ -223,7 +241,7 @@ fn render(frame: &mut Frame) {
 `Block` supports an optional drop shadow rendered behind the block using `Block::shadow`:
 
 ```rust
-use ratatui::widgets::block::{Block, Shadow};
+use ratatui::widgets::{Block, block::Shadow};
 
 let block = Block::bordered()
     .title("Popup")

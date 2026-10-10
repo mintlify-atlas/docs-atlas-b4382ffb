@@ -1,7 +1,7 @@
 ---
-title: "Ratatui Crate Structure and Workspace Layout"
+title: "Ratatui Workspace: Crate Structure and Layout Guide"
 sidebarTitle: "Crate Structure"
-description: "A complete guide to Ratatui's modular workspace, introduced in v0.30.0: all crates, dependency relationships, version numbers, and which crate to use for your project."
+description: "Ratatui's modular workspace introduced in v0.30.0: crates, dependency graph, version numbers, and guidance on which crate to use for your project."
 ---
 
 Starting with version 0.30.0, Ratatui was reorganized from a single monolithic crate into a modular Cargo workspace of specialized crates. This split improves compilation times, reduces unnecessary dependencies, provides more stable APIs for third-party widget libraries, and enables `no_std` support in the foundational crate. Most application developers can continue using the top-level `ratatui` crate unchanged — it re-exports everything from the sub-crates for convenience.

@@ -202,8 +202,9 @@ impl App {
 
 <Tip>
   Call `state.select_next()` and `state.select_previous()` in your key-event handler to move the
-  selection. These methods wrap around at the list boundaries by default, which gives a natural
-  navigation feel.
+  selection. `select_next()` moves the index forward (clamped at the last item after rendering) and
+  `select_previous()` moves it backward (clamped at `0`). Use `select_first()` and `select_last()`
+  to jump to the ends of the list.
 </Tip>
 
 <Note>

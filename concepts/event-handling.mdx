@@ -208,7 +208,9 @@ fn handle_mouse(ev: MouseEvent) {
 To determine which widget was clicked, compare `ev.column` and `ev.row` against the `Rect` returned by your layout:
 
 ```rust
-if sidebar_area.contains(crossterm::event::MouseEvent { column: ev.column, row: ev.row, .. }) {
+use ratatui::layout::Position;
+
+if sidebar_area.contains(Position { x: ev.column, y: ev.row }) {
     // click was inside the sidebar
 }
 ```

@@ -32,7 +32,7 @@ let data: Vec<(f64, f64)> = (0..=100)
 let dataset = Dataset::default()
     .name("sin(x)")           // Appears in the legend
     .data(&data)              // &[(f64, f64)]
-    .marker(Marker::Braille)  // Braille | Dot | Block | Bar | HalfBlock
+    .marker(Marker::Braille)  // Braille | Dot | Block | Bar | HalfBlock | Quadrant | Sextant | Octant | Custom(_)
     .graph_type(GraphType::Line)
     .cyan();
 ```
@@ -53,10 +53,14 @@ GraphType::Area     // Line graph with the area below the line filled
 | Marker | Characters | Resolution |
 |---|---|---|
 | `Marker::Braille` | `⠁⠂⠄⡀…` | 2×4 sub-cell dots — highest resolution |
-| `Marker::Dot` | `•` | 1 cell per point |
-| `Marker::Block` | `█` | 1 cell, fills with background colour too |
-| `Marker::Bar` | `▄` | 1×2 half-block |
-| `Marker::HalfBlock` | `▀▄█` | 1×2 per cell |
+| `Marker::Dot` | `•` | 1 point per cell |
+| `Marker::Block` | `█` | 1 point per cell, fills background too |
+| `Marker::Bar` | `▄` | 1 point per cell in bar shape |
+| `Marker::HalfBlock` | `▀▄█` | 2×1 per cell (double vertical resolution) |
+| `Marker::Quadrant` | quadrant chars | 2×2 per cell |
+| `Marker::Sextant` | sextant chars | 2×3 per cell |
+| `Marker::Octant` | octant chars | 2×4 per cell |
+| `Marker::Custom(char)` | any char | 1 point per cell |
 
 <Note>
   `Marker::Braille` requires a terminal font that includes the Unicode Braille Patterns block
